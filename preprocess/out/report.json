@@ -1,0 +1,167 @@
+{
+  "dem": {
+    "file": "CLH_DEM_Mosaic_HiRISE_CTX_HRSC_GCS_MARS_07-10-2018.tif",
+    "size_GB": 2.37,
+    "driver": "GTiff",
+    "width_px": 30490,
+    "height_px": 29519,
+    "bands": 1,
+    "dtype": "float32",
+    "nodata": -3.4028226550889045e+38,
+    "compression": "Compression.lzw",
+    "tiled": true,
+    "block_shape": [
+      128,
+      128
+    ],
+    "overviews": [],
+    "crs_wkt_head": "GEOGCS[\"GCS_Mars_2000_Sphere\",DATUM[\"Mars_2000_(Sphere)\",SPHEROID[\"Mars_2000_Sphere_IAU_IAG\",3396190,0],AUTHORITY[\"ESRI\",\"106971\"]],PRIMEM[\"Reference_Meridian\",0],UNIT[\"degree\",0.0174532925199433,AUTH",
+    "crs_params": {
+      "proj": "longlat",
+      "R": 3396190,
+      "no_defs": true
+    },
+    "crs_is_geographic": true,
+    "pixel_size_native": [
+      1.7145883079557923e-05,
+      1.714588307955836e-05
+    ],
+    "pixel_size_m": [
+      0.984,
+      1.016
+    ],
+    "extent_km": [
+      29.99,
+      30.0
+    ],
+    "bounds_xy": [
+      175.17529780484847,
+      -14.82767013970378,
+      175.6980757799442,
+      -14.321540817078297
+    ],
+    "units": [
+      null
+    ],
+    "band_descriptions": [
+      null
+    ],
+    "tags": {
+      "DataType": "Generic",
+      "AREA_OR_POINT": "Area"
+    },
+    "bounds_lonlat": {
+      "lon": [
+        175.1753,
+        175.6981
+      ],
+      "lat": [
+        -14.8277,
+        -14.3215
+      ]
+    },
+    "std_parallel": null,
+    "std_parallel_ok": false,
+    "preview_shape": [
+      1982,
+      2048
+    ],
+    "valid_ratio": 1.0,
+    "stats": {
+      "min": -2169.56103515625,
+      "p1": -1952.0448791503907,
+      "median": -1913.3633422851562,
+      "p99": -1860.1395751953125,
+      "max": -1776.0543212890625,
+      "mean": -1916.1909056224388,
+      "std": 22.176183233386055
+    }
+  },
+  "img": {
+    "file": "CLH_Visible_Mosaic_HiRISE_CTX_HRSC_GCS_MARS_07-10-2018.tif",
+    "size_GB": 4.21,
+    "driver": "GTiff",
+    "width_px": 121959,
+    "height_px": 118074,
+    "bands": 1,
+    "dtype": "uint8",
+    "nodata": 0.0,
+    "compression": "Compression.lzw",
+    "tiled": true,
+    "block_shape": [
+      128,
+      128
+    ],
+    "overviews": [],
+    "crs_wkt_head": "GEOGCS[\"GCS_Mars_2000_Sphere\",DATUM[\"Mars_2000_(Sphere)\",SPHEROID[\"Mars_2000_Sphere_IAU_IAG\",3396190,0],AUTHORITY[\"ESRI\",\"106971\"]],PRIMEM[\"Reference_Meridian\",0],UNIT[\"degree\",0.0174532925199433,AUTH",
+    "crs_params": {
+      "proj": "longlat",
+      "R": 3396190,
+      "no_defs": true
+    },
+    "crs_is_geographic": true,
+    "pixel_size_native": [
+      4.286470769889601e-06,
+      4.2864707698895825e-06
+    ],
+    "pixel_size_m": [
+      0.246,
+      0.254
+    ],
+    "extent_km": [
+      29.99,
+      30.0
+    ],
+    "bounds_xy": [
+      175.17529780484847,
+      -14.827661566762242,
+      175.69807149347344,
+      -14.321540817078299
+    ],
+    "units": [
+      null
+    ],
+    "band_descriptions": [
+      null
+    ],
+    "tags": {
+      "DataType": "Generic",
+      "AREA_OR_POINT": "Area"
+    },
+    "bounds_lonlat": {
+      "lon": [
+        175.1753,
+        175.6981
+      ],
+      "lat": [
+        -14.8277,
+        -14.3215
+      ]
+    },
+    "std_parallel": null,
+    "std_parallel_ok": false,
+    "preview_shape": [
+      1982,
+      2048
+    ],
+    "valid_ratio": 1.0,
+    "stats": {
+      "min": 1.0,
+      "p1": 69.0,
+      "median": 132.0,
+      "p99": 188.0,
+      "max": 254.0,
+      "mean": 131.7158592370396,
+      "std": 22.67394248178737
+    }
+  },
+  "grid_compare": {
+    "same_crs": true,
+    "same_bounds(±1m)": true,
+    "dem_px / img_px": [
+      4.0,
+      4.0
+    ],
+    "note": "같은 범위·좌표계. 해상도 비율만큼 리샘플하면 픽셀이 정확히 겹침"
+  }
+}
