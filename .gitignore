@@ -1,2 +1,9 @@
-/data
-/venv
+# 원본 데이터 (수 GB TIF 등) — 깃허브에 올리지 않음
+/data/
+
+# macOS
+.DS_Store
+
+# 에디터 / 기타
+.vscode/
+*.log
