@@ -12,7 +12,7 @@ import time
 import urllib.parse
 import urllib.request
 
-TITLE = "MRO HiRISE, DEM Columbia Hills"
+TITLE = "MGS MOLA and Mars Express HRSC, DEM"
 SAVE_DIR = "data"
 
 SEARCH_API = "https://trek.nasa.gov/mars/TrekServices/ws/index/eq/searchItems"
