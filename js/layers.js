@@ -202,7 +202,7 @@ function renderDemCanvas(id) {
         updateDemRange(true);
         scheduleScienceLayers();
       })
-      .catch((e) => console.warn("고도 레이어: DEM 을 읽지 못했어요 (file:// 로 열었다면 로컬 서버로 열어야 해요).", e));
+      .catch((e) => console.warn("고도 레이어: DEM 읽기 실패 (file:// 로 열었다면 로컬 서버 필요)", e));
     return null;
   }
   if (!m.canvas) return null;
@@ -325,7 +325,7 @@ function renderDemLegend() {
   q("hi").textContent = formatElevation(hi);
   q("note").textContent =
     demColor.mode === "view"
-      ? `지금 화면에 보이는 고도에 맞춘 색 (차이 ${Math.round(hi - lo)} m). 지도를 움직이면 다시 맞춰요.`
+      ? `지금 화면에 보이는 고도에 맞춘 색 (차이 ${Math.round(hi - lo)} m) · 지도를 움직이면 다시 맞춤`
       : "MOLA 400 km 전체 기준 색. MOLA 400 m 격자 · HiRISE 30 m 격자 (현위치 주변 3 km 는 2 m) + 음영기복";
   demControlEl.querySelectorAll("[data-mode]").forEach((btn) => {
     const on = btn.dataset.mode === demColor.mode;
@@ -393,7 +393,7 @@ function renderRadiationCanvas() {
           prepareRadiationMap(grid);
           scheduleScienceLayers();
         })
-        .catch((e) => console.warn("방사선 레이어: MOLA 고도를 읽지 못했어요 (file:// 로 열었다면 로컬 서버로 열어야 해요).", e));
+        .catch((e) => console.warn("방사선 레이어: MOLA 고도 읽기 실패 (file:// 로 열었다면 로컬 서버 필요)", e));
     }
     return null;
   }
@@ -632,7 +632,7 @@ const ENV_LEGENDS = {
     const info = env.ret.info;
     const items = RETURN_COLORS.map((c) => ({ color: `rgb(${c.rgb.join(",")})`, label: c.label }));
     if (!info) return { items, note: "계산 중… (기준점에서 다녀오는 데 드는 산소 · 시간)" };
-    if (info.outside) return { items, note: "기준점이 Columbia Hills 지도 밖이에요." };
+    if (info.outside) return { items, note: "기준점이 Columbia Hills 지도 밖" };
     const b = info.budget;
     const limiter = b.sunsetS < b.evaS ? `일몰까지 ${(b.sunsetS / 3600).toFixed(1)}시간` : `활동 시간 ${(b.evaS / 3600).toFixed(1)}시간`;
     return {
@@ -640,7 +640,7 @@ const ENV_LEGENDS = {
       note:
         `기준점: ${info.origin.isBase ? "기지 " : ""}${info.origin.name} · 왕복 가능 범위 약 ${info.reachKm2.toFixed(1)} km² (최대 ${(info.maxM / 1000).toFixed(1)} km). ` +
         `예산: 산소 ${Math.round(profileUsableO2L())} L · ${limiter} (안전 여유 ${PROFILE.marginPct}% 제외` +
-        `${b.sun.isDay ? "" : ", 지금은 밤 — 일몰 제한 미적용"}). 나의 정보 · 시계를 바꾸면 다시 계산해요.`,
+        `${b.sun.isDay ? "" : ", 지금은 밤 — 일몰 제한 미적용"}) · 나의 정보 · 시계 변경 시 다시 계산`,
     };
   },
   hazard_level: () => {
@@ -653,7 +653,7 @@ const ENV_LEGENDS = {
         { color: "rgba(255,77,77,0.85)", label: "위험 — 급경사 · 모래 함몰 · 바위 많음" },
       ],
       note:
-        "HUD 에서 보이는 위험 표시와 같은 기준이에요 (경사 한계는 나의 정보 값). 30 m 칸 단위 · 안전한 곳은 투명. " +
+        "HUD 위험 표시와 같은 기준 (경사 한계는 나의 정보 값) · 30 m 칸 단위 · 안전한 곳은 투명 · " +
         (total ? `Columbia Hills 30 km 중 주의 ${pct(s.caution)} · 위험 ${pct(s.danger)}` : "계산 중…") +
         (s && s.night ? " · 지금은 밤이라 그늘은 빼고 계산" : ""),
     };
@@ -665,7 +665,7 @@ const ENV_LEGENDS = {
     ],
     note: env.comm.count
       ? `기지 ${env.comm.count}곳 · 안테나 ${COMM_ANTENNA_M} m 기준 직선 가시 (지형 + 화성 곡률, 낮은 둔덕 ${COMM_CLEARANCE_M} m 는 회절로 통과)`
-      : "기지가 없어요. 포인트 탭 → 포인트 추가 → 종류 '기지' 로 추가하세요.",
+      : "기지 없음 · 포인트 탭 → 포인트 추가 → 종류 '기지' 로 추가",
   }),
 };
 

@@ -552,7 +552,7 @@ function renderPointList() {
   if (!region) {
     const empty = document.createElement("p");
     empty.className = "drawer__empty";
-    empty.textContent = "이 지역은 아직 지도·포인트 데이터가 없어요.";
+    empty.textContent = "이 지역은 아직 지도·포인트 데이터 없음";
     pointListEl.append(empty);
     return;
   }
@@ -728,7 +728,7 @@ function endMapPick() {
 // 포인트 추가: 버튼 → 지도 클릭 → 이름/종류 입력
 addPointBtn.addEventListener("click", () => {
   setDrawerOpen(false);
-  startMapPick("지도에서 추가할 위치를 클릭하세요", (lonLat) => {
+  startMapPick("지도에서 추가할 위치 클릭", (lonLat) => {
     pendingLonLat = lonLat;
     pointForm.reset();
     pointDialogCoords.textContent = formatLonLat(lonLat);

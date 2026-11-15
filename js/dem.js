@@ -34,7 +34,7 @@ function loadDemGrid(key) {
         reject(e); // file:// 에서는 보안 정책 때문에 픽셀을 읽을 수 없음
       }
     };
-    img.onerror = () => reject(new Error(`${info.height} 를 불러오지 못했어요`));
+    img.onerror = () => reject(new Error(`${info.height} 불러오기 실패`));
     img.src = info.height;
   });
   demPromises[key].catch(() => delete demPromises[key]); // 실패하면 다음에 다시 시도

@@ -82,7 +82,7 @@ function loadImg(src) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`${src} 를 불러오지 못했어요`));
+    img.onerror = () => reject(new Error(`${src} 불러오기 실패`));
     img.src = src;
   });
 }
@@ -235,8 +235,8 @@ function simSourceView(D, truth) {
 function renderModeInfo(mode) {
   const real = mode === "real";
   locModeSub.textContent = real
-    ? "시연: NASA Spirit 로버가 실제로 찍은 주변 사진을 위성 사진과 비교해 위치를 찾아요. (NASA JPL Censible 방식)"
-    : "화성엔 GPS가 없어요. 내 주변 지형을 위성 사진과 비교해서 지금 서 있는 정확한 위치를 찾아요. (NASA JPL Censible 방식)";
+    ? "시연: NASA Spirit 로버가 실제로 찍은 주변 사진을 위성 사진과 비교해 위치 계산 (NASA JPL Censible 방식)"
+    : "화성에는 GPS 없음 · 주변 지형을 위성 사진과 비교해 현재 위치 계산 (NASA JPL Censible 방식)";
   locStep1.textContent = real ? "로버가 찍은 주변 사진" : "내 주변 360° 촬영 (가상)";
   locOverviewCap.textContent = real ? "300m 주변 궤도 지도" : "200m 주변 위성 사진";
   locSrcCap.innerHTML = real
@@ -251,9 +251,9 @@ function renderModeInfo(mode) {
         <div><dt>해상도</dt><dd>원본 2 cm/px → 0.5 m/px 로 맞춰 사용</dd></div>
         <div><dt>실제 위치</dt><dd id="loc-src-coord">측정이 끝나면 공개 (정답)</dd></div>
       </dl>
-      <p class="loc-source__note">Spirit 로버가 <b>실제로 360° 촬영한 사진</b>을 위에서 본 지형으로 바꾼 자료예요.
-        이 사진을 <b>궤도 사진(data/ 가시광 모자이크)</b>과 Census 방식으로 맞춰 위치를 찾아요.
-        정답은 궤도 사진에 찍힌 Spirit 착륙선으로 확인한 값이에요.</p>`
+      <p class="loc-source__note">Spirit 로버가 <b>실제로 360° 촬영한 사진</b>을 위에서 본 지형으로 바꾼 자료.
+        <b>궤도 사진(data/ 가시광 모자이크)</b>과 Census 방식으로 맞춰 위치 계산.
+        정답은 궤도 사진에 찍힌 Spirit 착륙선으로 확인한 값.</p>`
     : `<h3>관측: 위성 사진으로 만든 가상 관측</h3>
       <dl>
         <div><dt>궤도 지도</dt><dd>현위치 주변 ±100m 고해상도 위성 사진 (HiRISE 등, 0.25 m/px)</dd></div>
@@ -261,8 +261,8 @@ function renderModeInfo(mode) {
         <div><dt>추정 위치</dt><dd>지금 앱이 알고 있는 현위치 (실제와 15~35m 어긋났다고 가정)</dd></div>
         <div><dt>실제 위치</dt><dd id="loc-src-coord">측정이 끝나면 공개 (정답)</dd></div>
       </dl>
-      <p class="loc-source__note">우주인 카메라가 아직 없어서 <b>위성 사진으로 관측을 흉내</b> 냈어요.
-        현위치가 바뀌어도 그 주변에서 동작해요. 실제 로버 사진으로 보려면 아래 <b>🛰 실제 로버 사진으로 해보기</b>를 누르세요.</p>`;
+      <p class="loc-source__note">우주인 카메라가 없어 <b>위성 사진으로 관측을 대신함</b>.
+        현위치가 바뀌어도 그 주변에서 동작. 실제 로버 사진으로 보려면 아래 <b>🛰 실제 로버 사진으로 해보기</b> 선택.</p>`;
 }
 
 // ---------- 격자 ↔ 경위도 ----------
@@ -573,11 +573,11 @@ async function runLocalization(mode = loc.mode) {
   } catch (e) {
     console.error(e);
     const msg = {
-      NO_POSITION: "이 지역은 현위치 정보가 없어요.",
-      NO_TILES: "고해상도 위성 사진 타일이 없어요.",
-      OUT_OF_TILES: "현위치 주변의 고해상도 위성 사진이 없어요 (Gusev 현위치 주변 3km 안에서만 가능).",
-    }[e.message] || "데이터를 읽지 못했어요. Live Server 등 http 로 열어 주세요.";
-    locResultEl.innerHTML = `<p class="loc-result__warn">${msg} 아래 <b>🛰 실제 로버 사진으로 해보기</b>는 언제나 시연할 수 있어요.</p>`;
+      NO_POSITION: "이 지역은 현위치 정보 없음",
+      NO_TILES: "고해상도 위성 사진 타일 없음",
+      OUT_OF_TILES: "현위치 주변 고해상도 위성 사진 없음 (Gusev 현위치 주변 3km 안에서만 가능)",
+    }[e.message] || "데이터 읽기 실패 · Live Server 등 http 로 열기 필요";
+    locResultEl.innerHTML = `<p class="loc-result__warn">${msg} · <b>🛰 실제 로버 사진으로 해보기</b>는 언제나 시연 가능</p>`;
     setLocBusy(false);
     return;
   }

@@ -36,7 +36,7 @@ function loadCesium() {
     const script = document.createElement("script");
     script.src = `${CESIUM_BASE}Cesium.js`;
     script.onload = resolve;
-    script.onerror = () => reject(new Error("CesiumJS 를 불러오지 못했어요"));
+    script.onerror = () => reject(new Error("CesiumJS 불러오기 실패"));
     document.head.append(script);
   });
 }
@@ -243,7 +243,7 @@ async function enter3D() {
   } catch (e) {
     console.error(e);
     globeLoading.hidden = true;
-    showGlobeMsg("3D 화성 지형을 불러오지 못했어요. 인터넷 연결과 Cesium 토큰을 확인하세요.");
+    showGlobeMsg("3D 화성 지형 불러오기 실패 · 인터넷 연결과 Cesium 토큰 확인 필요");
     globe.busy = false;
     hide3D();
     return;

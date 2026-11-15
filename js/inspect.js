@@ -243,7 +243,7 @@ function openInspect(p, point = null) {
       });
     } catch (e) {
       console.warn(e);
-      panoBtn.textContent = "DEM 을 읽지 못했어요";
+      panoBtn.textContent = "DEM 읽기 실패";
       return;
     }
     panoBtn.disabled = false;
@@ -255,7 +255,7 @@ function openInspect(p, point = null) {
     closeInspect();
     setDrawerOpen(true);
     document.getElementById("tab-route").click();
-    setRouteMsg(`${label}를 지정했어요.`);
+    setRouteMsg(`${label} 지정됨`);
   };
   btn("출발지로", "", toRoute(0, "출발지"));
   btn("도착지로", "", toRoute(1, "도착지"));

@@ -294,7 +294,7 @@ function loadSurvey() {
     return s;
   });
   survey.ready.catch((e) => {
-    console.warn("탐사 지형: DEM 을 읽지 못했어요 (file:// 로 열었다면 로컬 서버로 열어야 해요).", e);
+    console.warn("탐사 지형: DEM 읽기 실패 (file:// 로 열었다면 로컬 서버 필요)", e);
     survey.ready = null;
   });
   return survey.ready;

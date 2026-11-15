@@ -144,7 +144,7 @@ function pickStopOnMap(stop, label) {
     setDrawerOpen(true);
   };
   startMapPick(
-    `${label} 위치를 지도에서 클릭하세요 (기존 핀을 눌러도 돼요)${fromHud ? " · 고르면 HUD 로 돌아가요" : ""}`,
+    `${label} 위치를 지도에서 클릭 (기존 핀 선택 가능)${fromHud ? " · 선택 후 HUD 복귀" : ""}`,
     (lonLat, point) => {
       setStop(stop, lonLat, point ? point.name : null);
       finish();
@@ -156,7 +156,7 @@ function pickStopOnMap(stop, label) {
 function setStop(stop, lonLat, name = null) {
   stop.lonLat = lonLat;
   stop.name = name;
-  setRouteMsg(isInsideRegion(lonLat) ? "" : "⚠️ 현재 지도 범위 밖의 좌표예요.", !isInsideRegion(lonLat));
+  setRouteMsg(isInsideRegion(lonLat) ? "" : "⚠️ 현재 지도 범위 밖 좌표", !isInsideRegion(lonLat));
   onStopsChanged();
 }
 
@@ -293,7 +293,7 @@ function renderStops() {
       const lonLat = parseLonLat(input.value.split(" · ").pop());
       if (!lonLat) {
         input.classList.add("is-invalid");
-        setRouteMsg("좌표 형식을 확인하거나 목록에서 선택하세요. 예: 14.57S, 175.47E", true);
+        setRouteMsg("좌표 형식 확인 또는 목록에서 선택 · 예: 14.57S, 175.47E", true);
         return;
       }
       setStop(stop, lonLat, null);
@@ -844,12 +844,12 @@ async function findRoutes(stops, options = ROUTE_OPTIONS) {
 
 routeFindBtn.addEventListener("click", async () => {
   if (!REGIONS[currentRegion]) {
-    setRouteMsg("이 지역은 아직 지도 데이터가 없어요.", true);
+    setRouteMsg("이 지역은 아직 지도 데이터 없음", true);
     return;
   }
   const missing = nav.stops.findIndex((s) => !s.lonLat);
   if (missing !== -1) {
-    setRouteMsg(`${stopLabel(nav.stops[missing], missing)}를 입력하거나 지도에서 선택하세요.`, true);
+    setRouteMsg(`${stopLabel(nav.stops[missing], missing)} 입력 또는 지도에서 선택 필요`, true);
     return;
   }
 
@@ -858,7 +858,7 @@ routeFindBtn.addEventListener("click", async () => {
   try {
     const results = await findRoutes(nav.stops.map((s) => s.lonLat));
     if (!results.length) {
-      setRouteMsg(`경사 한계 ${PROFILE.slopeLimitDeg}° 안에서 걸어서 갈 수 있는 길을 찾지 못했어요. (나의 정보에서 조정 가능)`, true);
+      setRouteMsg(`경사 한계 ${PROFILE.slopeLimitDeg}° 안에서 걸어갈 수 있는 길 없음 (나의 정보에서 조정 가능)`, true);
       return;
     }
     nav.results = results;
@@ -877,8 +877,8 @@ routeFindBtn.addEventListener("click", async () => {
     console.warn(e);
     setRouteMsg(
       e.message === "outside"
-        ? "출발지 · 경유지 · 도착지가 모두 Columbia Hills 지도(HiRISE DEM 범위) 안에 있어야 해요."
-        : "지형 데이터를 읽지 못했어요. 로컬 서버(python3 -m http.server)로 열었는지 확인하세요.",
+        ? "출발지 · 경유지 · 도착지 모두 Columbia Hills 지도(HiRISE DEM 범위) 안에 있어야 함"
+        : "지형 데이터 읽기 실패 · 로컬 서버(python3 -m http.server)로 열었는지 확인 필요",
       true
     );
   } finally {
@@ -952,7 +952,7 @@ function replanFromHere(here, changed) {
   P.computeShortestPath();
   const cells = P.extractPath();
   if (!cells) {
-    setRouteMsg("앞의 지형이 지도와 달라 지금 위치에서 갈 수 있는 길이 없어요. 다른 경로를 골라 보세요.", true);
+    setRouteMsg("앞의 지형이 지도와 달라 현재 위치에서 갈 수 있는 길 없음 · 다른 경로 선택 필요", true);
     return;
   }
   const path = [{ ...here }];
@@ -977,7 +977,7 @@ function replanFromHere(here, changed) {
 document.addEventListener("profilechange", () => {
   if (nav.results.length) {
     onStopsChanged();
-    setRouteMsg("나의 정보가 바뀌었어요. 길을 다시 찾아 주세요.");
+    setRouteMsg("나의 정보 변경됨 · 길 찾기 다시 실행 필요");
   }
 });
 
@@ -985,7 +985,7 @@ document.addEventListener("profilechange", () => {
 document.addEventListener("surveyreset", () => {
   if (nav.results.length) {
     onStopsChanged();
-    setRouteMsg("탐사 기록을 지웠어요. 길을 다시 찾아 주세요.");
+    setRouteMsg("탐사 기록 삭제됨 · 길 찾기 다시 실행 필요");
   }
 });
 
@@ -1046,7 +1046,7 @@ function renderResults() {
     btn.addEventListener("click", () => startGuidance(sel));
     const hint = document.createElement("span");
     hint.className = "route-start__hint";
-    hint.textContent = "아래에서 다른 길을 눌러 바꿀 수 있어요";
+    hint.textContent = "아래에서 다른 길 선택 가능";
     bar.append(btn, hint);
     routeResultsEl.append(bar);
   }

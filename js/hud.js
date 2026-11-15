@@ -1068,13 +1068,13 @@ function updateRouteGuide(L, now) {
   let warn = "";
   let state = "";
   if (remaining < 8) {
-    warn = "목적지에 도착했어요!";
+    warn = "목적지 도착";
     state = "is-arrived";
   } else if (near.d > OFF_ROUTE_M) {
-    warn = `경로에서 ${Math.round(near.d)}m 벗어났어요`;
+    warn = `경로 이탈 ${Math.round(near.d)}m`;
     state = "is-off";
   } else if (Math.abs(turn) > 35) {
-    warn = `${turn > 0 ? "오른쪽" : "왼쪽"}으로 ${Math.round(Math.abs(turn))}° 돌아가세요`;
+    warn = `${turn > 0 ? "오른쪽" : "왼쪽"}으로 ${Math.round(Math.abs(turn))}° 회전`;
   }
   hudGuideWarn.textContent = warn;
   hudGuide.className = `hud-guide ${state}`;
@@ -1116,7 +1116,7 @@ function loadScriptOnce(src) {
     const s = document.createElement("script");
     s.src = src;
     s.onload = resolve;
-    s.onerror = () => reject(new Error(`${src} 를 불러오지 못했어요`));
+    s.onerror = () => reject(new Error(`${src} 불러오기 실패`));
     document.head.append(s);
   });
 }
@@ -1166,7 +1166,7 @@ function loadHudTerrainData() {
     hud3d.dataPromise = Promise.allSettled(DEM_ORDER.map(loadDemGrid)).then((results) => {
       hud3d.grids = results.filter((r) => r.status === "fulfilled").map((r) => worldGrid(r.value));
       const failed = results.find((r) => r.status === "rejected");
-      if (failed) console.warn("DEM 일부를 불러오지 못했어요.", failed.reason);
+      if (failed) console.warn("DEM 일부 불러오기 실패", failed.reason);
     });
   }
   return hud3d.dataPromise;
@@ -1298,7 +1298,7 @@ async function initTerrain3D() {
     await loadHudTerrainData(); // 고도 · 경사는 여기까지만 돼도 동작
     const grid = (key) => hud3d.grids.find((g) => g.key === key);
     const near = grid("near"), far = grid("hirise"), wide = grid("mola");
-    if (!near || !far) throw new Error("DEM 을 불러오지 못했어요 (file:// 로 열었다면 로컬 서버로 열어야 해요)");
+    if (!near || !far) throw new Error("DEM 불러오기 실패 (file:// 로 열었다면 로컬 서버 필요)");
     hud3d.origin = { ...hud.world };
 
     await loadScriptOnce(THREE_URL);
@@ -1335,7 +1335,7 @@ async function initTerrain3D() {
     hudScene.hidden = true; // 파노라마 대신 실제 지형
     resizeTerrain3D();
   } catch (e) {
-    console.warn("실제 지형 3D 를 준비하지 못해 파노라마로 표시합니다.", e);
+    console.warn("실제 지형 3D 준비 실패 → 파노라마로 표시", e);
     hud3d.failed = true;
   } finally {
     hud3d.loading = false;
