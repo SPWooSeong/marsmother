@@ -34,21 +34,23 @@ Finds your exact position without GPS by matching the terrain around you against
 <img src="./src/locate.png">
 
 ## Data
-assets/<br>
-ㄴlayers/<br>
-	ㄴhirise-relief.jpg # MRO HiRISE, DEM Columbia Hills in Mars Trek <br>
-	ㄴmola-relief.jpg # MGS MOLA and Mars Express HRSC, DEM in Mars Trek <br>
-	ㄴti-overlay.png # MGS TES, Global Thermal Inertia in Mars Tre k<br>
-ㄴlocalize/<br>
-	ㄴspirit-orbit.png # https://pds.nasa.gov <br>
-	ㄴspirit-sol036-obs.png # https://pds.nasa.gov <br>
-	ㄴspirit-sol036-view.png # https://pds.nasa.gov <br>
-ㄴmaps/ # MRO HiRISE, Mosaic Columbia Hills in Mars Trek <br>
-ㄴrover/ # https://science.nasa.gov/photojournal/ <br>
-ㄴsites/ # https://pds.nasa.gov <br>
-ㄴterrain/ <br>
-	ㄴhud-tiles/ # MRO HiRISE, DEM Columbia Hills in Mars Trek <br>
-	ㄴgusev-30km-height.png # MRO HiRISE, DEM Columbia Hills in Mars Trek <br>
-	ㄴhud-near-height.png # MRO HiRISE, DEM Columbia Hills in Mars Trek <br>
-	ㄴhud-near-surface.jpg # MRO HiRISE, Mosaic Columbia Hills in Mars Trek <br>
-	ㄴmola-400km-height.png # MGS MOLA and Mars Express HRSC, DEM in Mars Trek <br>
+```
+assets/
+ㄴlayers/
+	ㄴhirise-relief.jpg # MRO HiRISE, DEM Columbia Hills in Mars Trek 
+	ㄴmola-relief.jpg # MGS MOLA and Mars Express HRSC, DEM in Mars Trek 
+	ㄴti-overlay.png # MGS TES, Global Thermal Inertia in Mars Trek
+ㄴlocalize/
+	ㄴspirit-orbit.png # https://pds.nasa.gov 
+	ㄴspirit-sol036-obs.png # https://pds.nasa.gov 
+	ㄴspirit-sol036-view.png # https://pds.nasa.gov 
+ㄴmaps/ # MRO HiRISE, Mosaic Columbia Hills in Mars Trek 
+ㄴrover/ # https://science.nasa.gov/photojournal/ 
+ㄴsites/ # https://pds.nasa.gov 
+ㄴterrain/ 
+	ㄴhud-tiles/ # MRO HiRISE, DEM Columbia Hills in Mars Trek 
+	ㄴgusev-30km-height.png # MRO HiRISE, DEM Columbia Hills in Mars Trek 
+	ㄴhud-near-height.png # MRO HiRISE, DEM Columbia Hills in Mars Trek 
+	ㄴhud-near-surface.jpg # MRO HiRISE, Mosaic Columbia Hills in Mars Trek 
+	ㄴmola-400km-height.png # MGS MOLA and Mars Express HRSC, DEM in Mars Trek 
+```
