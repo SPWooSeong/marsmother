@@ -1,52 +1,46 @@
-// Mars Mother - 길찾기 (데모)
-// 실제 길찾기 알고리즘 대신, 출발지→경유지→도착지를 잇는 "그럴듯한 가짜 경로"와 수치를 만들어
-// 화면 흐름만 보여줌.
-// TODO: buildDemoRoute() 를 실제 알고리즘(DEM·위험지역 기반 탐색)으로 교체
+// Mars Mother - 길찾기 (실제 지형 기반)
+// 출발지 → 경유지 → 도착지 사이를 실제 DEM 위에서 A* 로 탐색.
+//  - 지형: HiRISE DEM 30 m 격자 (Columbia Hills 30 km 전체) · 경사는 이웃 칸 높이 차로 계산
+//  - 지표: TES 열관성으로 추정한 모래 빠짐 위험 (무른 땅일수록 느리고 힘듦)
+//  - 시간 · 에너지 · 산소 · 냉각수: js/eva.js 의 보행 모델
+//  - 방사선: 오른쪽 위 시계의 시각부터 걸으면서 받는 양 (js/marstime.js 모델, 고도 · 계절 · 시각 반영)
 //
 // main.js 의 전역 값/함수를 사용: mapEl, view, applyView, positionPins, lonLatToImage,
 // formatLonLat, setDrawerOpen, drawer, startMapPick, REGIONS, currentRegion
+// dem.js: loadDemGrid, demElevation / eva.js / marstime.js: marsClock, radiationFactors, radiationBase
 
 // ---------- 설정 ----------
 const MARS_RADIUS_M = 3396190;
 const DEG_TO_M = (Math.PI * MARS_RADIUS_M) / 180;
-const BASE_ELEVATION_M = -1913; // Gusev DEM 중앙값 (preprocess/out/report.json)
-const SURFACE_RADIATION_USV_PER_H = 27; // 화성 표면 평균 약 0.65 mSv/일
 const MAX_WAYPOINTS = 3;
 
-// 경로 종류: 데모용으로 경로 모양(bend: 휘는 정도)과 지형 굴곡, 이동 속도 등을 다르게 줌
+// 경로 종류 = A* 의 비용 기준
+//  cost(edge) → 그 칸으로 가는 비용. maxSlope 보다 가파른 칸은 못 지나감
 const ROUTE_OPTIONS = [
   {
     id: "safe",
     name: "안전한 길",
-    desc: "위험 지역 우회 · 완만한 경사",
+    desc: "경사 15° 미만 · 모래 지대와 비탈 피함",
     color: "#4c8dff",
-    bend: 0.28,
-    roughness: 14,
-    speedKmh: 2.6,
-    o2LPerHour: 70,
-    radiationFactor: 0.8,
+    maxSlopeDeg: 15,
+    // 걸리는 시간 × 위험 가중치 (8° 넘는 비탈, 모래 빠짐 위험)
+    cost: (e) => e.timeS * (1 + Math.max(0, e.slopeDeg - 8) * 0.5 + (e.eta - 1.1) * 4),
   },
   {
     id: "shortest",
     name: "최단 거리",
-    desc: "가장 짧지만 경사가 가파름",
+    desc: "가장 짧은 길 · 경사 25° 까지 감수",
     color: "#7ed957",
-    bend: 0.03,
-    roughness: 70,
-    speedKmh: 3.0,
-    o2LPerHour: 85,
-    radiationFactor: 1,
+    maxSlopeDeg: 25,
+    cost: (e) => e.distM,
   },
   {
-    id: "easy",
-    name: "편안한 길",
-    desc: "평탄한 지형 위주 · 거리가 김",
+    id: "energy",
+    name: "체력 아끼는 길",
+    desc: "산소 · 체력 소모가 가장 적은 길",
     color: "#ffd84d",
-    bend: -0.42,
-    roughness: 7,
-    speedKmh: 3.4,
-    o2LPerHour: 60,
-    radiationFactor: 1,
+    maxSlopeDeg: 25,
+    cost: (e) => e.energyJ,
   },
 ];
 
@@ -328,83 +322,266 @@ function resetRoute() {
 routeResetBtn.addEventListener("click", resetRoute);
 document.addEventListener("regionchange", resetRoute);
 
-// ---------- 데모 경로 만들기 ----------
+// ---------- 실제 길찾기 (A*) ----------
 function distanceM(a, b) {
   const cos = Math.cos((((a.lat + b.lat) / 2) * Math.PI) / 180);
   return Math.hypot((b.lon - a.lon) * cos * DEG_TO_M, (b.lat - a.lat) * DEG_TO_M);
 }
 
-// 가짜 지형 고도: 위치 기반 굴곡 + 경로 종류별 잔굴곡
-function demoElevation(p, d, opt) {
-  const terrain = 30 * Math.sin(p.lon * 150) + 25 * Math.cos(p.lat * 200);
-  const bumps = opt.roughness * (0.6 * Math.sin(d / 230 + 1.3) + 0.4 * Math.sin(d / 97 + 0.4));
-  return BASE_ELEVATION_M + terrain + bumps;
+// 탐색용 격자: HiRISE 30 m DEM + 칸마다 경사 · 지면 계수 (처음 한 번 만듦)
+let routeGridPromise = null;
+function loadRouteGrid() {
+  if (!routeGridPromise) {
+    routeGridPromise = loadDemGrid("hirise").then((dem) => {
+      const { w, h, values: z, bounds: b } = dem;
+      const lat0 = (b.latMin + b.latMax) / 2;
+      const dx = ((b.lonMax - b.lonMin) / (w - 1)) * DEG_TO_M * Math.cos((lat0 * Math.PI) / 180);
+      const dy = ((b.latMax - b.latMin) / (h - 1)) * DEG_TO_M;
+      // 칸의 경사 (°)
+      const slope = new Float32Array(w * h);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const gx = (z[y * w + Math.min(w - 1, x + 1)] - z[y * w + Math.max(0, x - 1)]) / (2 * dx);
+          const gy = (z[Math.max(0, y - 1) * w + x] - z[Math.min(h - 1, y + 1) * w + x]) / (2 * dy);
+          slope[y * w + x] = (Math.atan(Math.hypot(gx, gy)) * 180) / Math.PI;
+        }
+      }
+      // 지면 계수: 열관성 해상도(약 7 km)가 낮아 32×32 칸 묶음으로 계산
+      const eta = new Float32Array(w * h);
+      const B = 32;
+      for (let by = 0; by < h; by += B) {
+        for (let bx = 0; bx < w; bx += B) {
+          const cx = Math.min(w - 1, bx + B / 2);
+          const cy = Math.min(h - 1, by + B / 2);
+          const v = terrainEta(b.lonMin + (cx / (w - 1)) * (b.lonMax - b.lonMin), b.latMax - (cy / (h - 1)) * (b.latMax - b.latMin));
+          for (let y = by; y < Math.min(h, by + B); y++) eta.fill(v, y * w + bx, y * w + Math.min(w, bx + B));
+        }
+      }
+      return { w, h, z, slope, eta, b, dx, dy };
+    });
+    routeGridPromise.catch(() => (routeGridPromise = null));
+  }
+  return routeGridPromise;
 }
 
-function buildDemoRoute(opt, stops) {
-  // 1) 경로 모양: 각 구간을 옆으로 휘게 만든 곡선
-  const path = [];
-  for (let s = 0; s < stops.length - 1; s++) {
-    const a = stops[s];
-    const b = stops[s + 1];
-    const cos = Math.cos((a.lat * Math.PI) / 180);
-    const dx = (b.lon - a.lon) * cos;
-    const dy = b.lat - a.lat;
-    const len = Math.hypot(dx, dy);
-    const N = 40;
+function gridIndexOf(g, p) {
+  const x = Math.round(((p.lon - g.b.lonMin) / (g.b.lonMax - g.b.lonMin)) * (g.w - 1));
+  const y = Math.round(((g.b.latMax - p.lat) / (g.b.latMax - g.b.latMin)) * (g.h - 1));
+  return x < 0 || y < 0 || x >= g.w || y >= g.h ? -1 : y * g.w + x;
+}
 
-    for (let k = s === 0 ? 0 : 1; k <= N; k++) {
-      const t = k / N;
-      let x = dx * t;
-      let y = dy * t;
-      if (len > 0) {
-        const off = len * (opt.bend * Math.sin(Math.PI * t) + 0.04 * Math.sin(3 * Math.PI * t));
-        x += (-dy / len) * off;
-        y += (dx / len) * off;
+function gridLonLat(g, i) {
+  const x = i % g.w;
+  const y = (i - x) / g.w;
+  return {
+    lon: g.b.lonMin + (x / (g.w - 1)) * (g.b.lonMax - g.b.lonMin),
+    lat: g.b.latMax - (y / (g.h - 1)) * (g.b.latMax - g.b.latMin),
+  };
+}
+
+// 이진 힙 (A* 열린 목록)
+class MinHeap {
+  constructor() {
+    this.keys = [];
+    this.vals = [];
+  }
+  get size() {
+    return this.keys.length;
+  }
+  push(key, val) {
+    const k = this.keys, v = this.vals;
+    let i = k.length;
+    k.push(key);
+    v.push(val);
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (k[p] <= key) break;
+      k[i] = k[p];
+      v[i] = v[p];
+      i = p;
+    }
+    k[i] = key;
+    v[i] = val;
+  }
+  pop() {
+    const k = this.keys, v = this.vals;
+    const top = v[0];
+    const lastK = k.pop(), lastV = v.pop();
+    if (k.length) {
+      let i = 0;
+      const n = k.length;
+      for (;;) {
+        let c = 2 * i + 1;
+        if (c >= n) break;
+        if (c + 1 < n && k[c + 1] < k[c]) c++;
+        if (k[c] >= lastK) break;
+        k[i] = k[c];
+        v[i] = v[c];
+        i = c;
       }
-      path.push({ lon: a.lon + x / cos, lat: a.lat + y });
+      k[i] = lastK;
+      v[i] = lastV;
+    }
+    return top;
+  }
+}
+
+// 16방향 이웃 (나이트 이동까지 → 경로가 덜 계단 모양)
+const ROUTE_NEIGHBORS = [
+  [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1],
+  [2, 1], [2, -1], [-2, 1], [-2, -1], [1, 2], [1, -2], [-1, 2], [-1, -2],
+];
+
+// 한 칸에서 이웃 칸으로 가는 비용 요소
+function edgeOf(g, i, j, ddx, ddy) {
+  const horiz = Math.hypot(ddx * g.dx, ddy * g.dy);
+  const rise = g.z[j] - g.z[i];
+  const grade = rise / horiz;
+  const eta = (g.eta[i] + g.eta[j]) / 2;
+  const distM = Math.hypot(horiz, rise);
+  const v = evaSpeed(grade, eta);
+  const timeS = distM / v;
+  return { distM, timeS, energyJ: evaMetabolicW(v, grade, eta) * timeS, slopeDeg: Math.max(g.slope[i], g.slope[j]), eta };
+}
+
+function astar(g, opt, from, to) {
+  const N = g.w * g.h;
+  const cost = new Float64Array(N).fill(Infinity);
+  const prev = new Int32Array(N).fill(-1);
+  const closed = new Uint8Array(N);
+  const tx = to % g.w, ty = (to - tx) / g.w;
+  const minPerM = opt.id === "shortest" ? 1 : opt.id === "energy" ? EVA_MIN_J_PER_M : 1 / (EVA.flatSpeedMps * Math.exp(3.5 * 0.05));
+  const hfun = (i) => {
+    const x = i % g.w, y = (i - x) / g.w;
+    return Math.hypot((x - tx) * g.dx, (y - ty) * g.dy) * minPerM;
+  };
+  const open = new MinHeap();
+  cost[from] = 0;
+  open.push(hfun(from), from);
+  while (open.size) {
+    const i = open.pop();
+    if (closed[i]) continue;
+    if (i === to) break;
+    closed[i] = 1;
+    const x = i % g.w, y = (i - x) / g.w;
+    for (const [ddx, ddy] of ROUTE_NEIGHBORS) {
+      const nx = x + ddx, ny = y + ddy;
+      if (nx < 0 || ny < 0 || nx >= g.w || ny >= g.h) continue;
+      const j = ny * g.w + nx;
+      if (closed[j]) continue;
+      // 나이트 이동은 지나치는 두 칸도 지날 수 있어야 함
+      if (Math.abs(ddx) + Math.abs(ddy) === 3) {
+        const mx = x + Math.sign(ddx) * (Math.abs(ddx) === 2 ? 1 : 0);
+        const my = y + Math.sign(ddy) * (Math.abs(ddy) === 2 ? 1 : 0);
+        if (g.slope[my * g.w + mx] > opt.maxSlopeDeg) continue;
+      }
+      if (g.slope[j] > opt.maxSlopeDeg && j !== to) continue;
+      const c = cost[i] + opt.cost(edgeOf(g, i, j, ddx, ddy));
+      if (c < cost[j]) {
+        cost[j] = c;
+        prev[j] = i;
+        open.push(c + hfun(j), j);
+      }
+    }
+  }
+  if (prev[to] === -1 && from !== to) return null;
+  const cells = [];
+  for (let i = to; i !== -1; i = prev[i]) cells.push(i);
+  return cells.reverse();
+}
+
+// 경로를 일정 간격으로 따라가며 실제 고도 · 경사 · 시간 · 소모량 · 방사선을 계산
+function measureRoute(opt, path) {
+  const STEP_M = 10;
+  const samples = [];
+  for (let k = 1; k < path.length; k++) {
+    const a = path[k - 1], b = path[k];
+    const n = Math.max(1, Math.ceil(distanceM(a, b) / STEP_M));
+    for (let t = k === 1 ? 0 : 1; t <= n; t++) {
+      const lon = a.lon + ((b.lon - a.lon) * t) / n;
+      const lat = a.lat + ((b.lat - a.lat) * t) / n;
+      const e = demElevation(lon, lat);
+      samples.push({ lon, lat, elev: e ? e.m : NaN });
     }
   }
 
-  // 2) 거리·고도 프로필
-  let dist = 0;
-  let climb = 0;
-  let maxSlope = 0;
+  const start = marsClock.now().getTime();
+  let dist = 0, climb = 0, maxSlope = 0, timeS = 0, energyJ = 0, doseMsv = 0, sandM = 0;
   const profile = [];
-  path.forEach((p, i) => {
-    if (i > 0) dist += distanceM(path[i - 1], p);
-    const elev = demoElevation(p, dist, opt);
+  samples.forEach((p, i) => {
     if (i > 0) {
-      const prev = profile[i - 1];
-      const de = elev - prev.elev;
-      const dd = dist - prev.dist;
-      if (de > 0) climb += de;
-      if (dd > 0) maxSlope = Math.max(maxSlope, (Math.atan(Math.abs(de) / dd) * 180) / Math.PI);
+      const q = samples[i - 1];
+      const horiz = distanceM(q, p);
+      const rise = p.elev - q.elev;
+      const grade = horiz > 0 ? rise / horiz : 0;
+      const eta = terrainEta(p.lon, p.lat);
+      const d3 = Math.hypot(horiz, rise);
+      const v = evaSpeed(grade, eta);
+      const dt = d3 / v;
+      dist += d3;
+      if (rise > 0) climb += rise;
+      if (eta > 1.1) sandM += d3;
+      // 경사는 30 m 구간 기준 (DEM 잡음에 덜 흔들리게)
+      const back = samples[Math.max(0, i - 3)];
+      const span = distanceM(back, p);
+      if (span > 0) maxSlope = Math.max(maxSlope, (Math.atan(Math.abs(p.elev - back.elev) / span) * 180) / Math.PI);
+      energyJ += evaMetabolicW(v, grade, eta) * dt;
+      const when = new Date(start + timeS * 1000);
+      doseMsv += (radiationBase(p.elev) * radiationFactors(when, p.lon).total * dt) / 86400;
+      timeS += dt;
     }
-    profile.push({ dist, elev });
+    profile.push({ dist, elev: p.elev });
   });
-
-  // 3) 시간과 소모량 (데모 공식)
-  const hours = dist / 1000 / opt.speedKmh + climb / 400;
   const elevs = profile.map((p) => p.elev);
-
+  const o2L = energyJ / 1000 / EVA.o2KjPerL;
   return {
     ...opt,
     path,
     profile,
     distanceM: dist,
-    hours,
+    hours: timeS / 3600,
     climbM: climb,
     maxSlopeDeg: maxSlope,
     maxElevM: Math.max(...elevs),
     minElevM: Math.min(...elevs),
-    kcal: Math.round((hours * 280 + climb * 1.5) / 10) * 10,
-    o2L: Math.round(hours * opt.o2LPerHour),
-    radiationUSv: hours * SURFACE_RADIATION_USV_PER_H * opt.radiationFactor,
+    kcal: Math.round(energyJ / 4184),
+    o2L,
+    o2TankPct: (o2L / EVA.o2TankL) * 100,
+    waterKg: ((energyJ / 1000) * EVA.heatToWater) / EVA.sublimationKjPerKg,
+    radiationUSv: doseMsv * 1000,
+    sandM,
   };
 }
 
-routeFindBtn.addEventListener("click", () => {
+// 출발 → 경유 → 도착 순서로 구간마다 A* 를 돌려 이어 붙임
+function planRoute(g, opt, stops) {
+  const path = [];
+  for (let s = 0; s < stops.length - 1; s++) {
+    const a = gridIndexOf(g, stops[s]);
+    const b = gridIndexOf(g, stops[s + 1]);
+    const cells = astar(g, opt, a, b);
+    if (!cells) return null;
+    if (s === 0) path.push({ ...stops[0] });
+    for (const c of cells.slice(1, -1)) path.push(gridLonLat(g, c));
+    path.push({ ...stops[s + 1] });
+  }
+  return measureRoute(opt, path);
+}
+
+async function findRoutes(stops, options = ROUTE_OPTIONS) {
+  const g = await loadRouteGrid();
+  await Promise.allSettled(["near", "hirise"].map(loadDemGrid)); // 고도 프로필용
+  for (const p of stops) if (gridIndexOf(g, p) === -1) throw new Error("outside");
+  const results = [];
+  for (const opt of options) {
+    await new Promise((r) => setTimeout(r)); // 화면이 멈추지 않게 경로 하나마다 쉼
+    const r = planRoute(g, opt, stops);
+    if (r) results.push(r);
+  }
+  return results;
+}
+
+routeFindBtn.addEventListener("click", async () => {
   if (!REGIONS[currentRegion]) {
     setRouteMsg("이 지역은 아직 지도 데이터가 없어요.", true);
     return;
@@ -415,14 +592,42 @@ routeFindBtn.addEventListener("click", () => {
     return;
   }
 
-  const points = nav.stops.map((s) => s.lonLat);
-  nav.results = ROUTE_OPTIONS.map((opt) => buildDemoRoute(opt, points));
-  nav.selectedId = nav.results[0].id;
-  setRouteMsg("※ 데모 결과예요. 실제 길찾기 알고리즘은 아직 적용되지 않았어요.");
-  renderResults();
-  renderNavMap();
-  fitNavRoutes();
+  setRouteMsg("실제 지형(HiRISE DEM)으로 경로 계산 중…");
+  routeFindBtn.disabled = true;
+  try {
+    const results = await findRoutes(nav.stops.map((s) => s.lonLat));
+    if (!results.length) {
+      setRouteMsg("경사가 너무 가팔라서 걸어서 갈 수 있는 길을 찾지 못했어요.", true);
+      return;
+    }
+    nav.results = results;
+    nav.selectedId = results[0].id;
+    const missingNames = ROUTE_OPTIONS.filter((o) => !results.some((r) => r.id === o.id)).map((o) => o.name);
+    setRouteMsg(
+      `HiRISE DEM 30 m · 열관성 모래 위험 · 출발 ${formatClockTime(marsClock.now())} 기준` +
+        (missingNames.length ? ` · ${missingNames.join(", ")}: 조건에 맞는 길 없음` : "")
+    );
+    renderResults();
+    renderNavMap();
+    fitNavRoutes();
+    document.dispatchEvent(new CustomEvent("routeschange"));
+  } catch (e) {
+    console.warn(e);
+    setRouteMsg(
+      e.message === "outside"
+        ? "출발지 · 경유지 · 도착지가 모두 Columbia Hills 지도(HiRISE DEM 범위) 안에 있어야 해요."
+        : "지형 데이터를 읽지 못했어요. 로컬 서버(python3 -m http.server)로 열었는지 확인하세요.",
+      true
+    );
+  } finally {
+    routeFindBtn.disabled = false;
+  }
 });
+
+function formatClockTime(d) {
+  const t = marsTime(d, clockLocation().lon);
+  return `화성 지방시 ${formatClock(t.ltst)}`;
+}
 
 // ---------- 결과 카드 ----------
 function formatDuration(hours) {
@@ -496,12 +701,15 @@ function renderResults() {
     const stats = document.createElement("dl");
     stats.className = "route-card__stats";
     const rows = [
-      ["소모 칼로리", `${r.kcal.toLocaleString()} kcal`],
-      ["소모 산소", `${r.o2L.toLocaleString()} L`],
+      ["소모 에너지", `${r.kcal.toLocaleString()} kcal`],
+      ["소모 산소", `${Math.round(r.o2L).toLocaleString()} L (${Math.round(r.o2TankPct)}%)`],
+      ["냉각수", `${r.waterKg.toFixed(2)} kg`],
       ["방사선 노출", `${r.radiationUSv.toFixed(1)} μSv`],
-      ["최고 고도", formatElev(r.maxElevM)],
       ["최대 경사", `${r.maxSlopeDeg.toFixed(1)}°`],
       ["누적 오르막", `${Math.round(r.climbM)} m`],
+      ["최고 고도", formatElev(r.maxElevM)],
+      ["모래 지대", formatDistance(r.sandM)],
+      ["평균 속도", `${(r.distanceM / 1000 / Math.max(r.hours, 1e-6)).toFixed(1)} km/h`],
     ];
     for (const [k, v] of rows) {
       const wrap = document.createElement("div");

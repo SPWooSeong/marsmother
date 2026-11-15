@@ -3,10 +3,13 @@
 // 위에서 내려다본(2D와 같은) 모습에서 시작해, 카메라가 화성 지평선이 보이도록 날아가며 기울어짐.
 // 화성 전체 지형은 Cesium ion 의 Mars 3D Tiles (NASA, ESA, USGS) 를 사용하고,
 // 그 위에 우리 데이터(탐사 지역 테두리, 포인트, 경로, 현위치, 길찾기 결과)를 올림.
+// 고도 표시: data/ 의 실제 DEM (MOLA 400 km + HiRISE 30 km) 으로 지형에 고도 색을 입히고,
+//           마우스를 올린 지점과 포인트의 고도를 숫자로 보여 줌.
 //
 // 사용하는 전역 값: CESIUM_ION_TOKEN, MARS_TILESET_ASSET_ID (config.js)
 //                  REGIONS, REGION_CENTERS, POINT_TYPES (data/points.js)
-//                  currentRegion, getPoints (main.js) / getCurrentPosition, nav (route.js)
+//                  currentRegion, getPoints, formatLonLat (main.js) / getCurrentPosition, nav (route.js)
+//                  DEM_DATA (data/terrain.js) / loadDemGrid, demElevation, formatElevation, DEM_LABELS (dem.js)
 
 // ---------- 설정 ----------
 const CESIUM_VERSION = "1.135";
@@ -73,7 +76,102 @@ async function initCesium() {
   });
   scene.primitives.add(tileset);
 
+  await initElevation();
   globe.ready = true;
+}
+
+// ---------- 고도 표시 (실제 DEM) ----------
+const ELEVATION_KEYS = ["mola", "hirise"]; // 넓은 것 먼저 → 좁고 정밀한 것이 위에
+const ELEVATION_NAMES = { mola: "광역 400 km · MOLA", hirise: "Columbia Hills 30 km · HiRISE" };
+const elevToggle = document.getElementById("globe-elev-toggle");
+const elevLegend = document.getElementById("globe-elev-legend");
+const elevReadout = document.getElementById("globe-elev-readout");
+const elevation = { source: null };
+
+// 고도 색 지도를 화성 3D 지형 위에 덮음 (지형에 붙는 사각형. 포인트·경로와 따로 관리)
+async function initElevation() {
+  renderElevationLegend();
+  elevation.source = new Cesium.CustomDataSource("elevation");
+  elevation.source.show = elevToggle.checked;
+  await viewer.dataSources.add(elevation.source);
+  ELEVATION_KEYS.forEach((key, i) => {
+    const { relief, bounds: b } = DEM_DATA[key];
+    elevation.source.entities.add({
+      rectangle: {
+        coordinates: Cesium.Rectangle.fromDegrees(b.lonMin, b.latMin, b.lonMax, b.latMax),
+        material: new Cesium.ImageMaterialProperty({
+          image: relief,
+          color: Cesium.Color.WHITE.withAlpha(key === "mola" ? 0.6 : 0.85),
+          transparent: true,
+        }),
+        classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+        zIndex: i,
+      },
+    });
+  });
+
+  // 고도 숫자: DEM 을 다 읽으면 포인트 이름표에도 고도를 붙임
+  Promise.allSettled(ELEVATION_KEYS.map(loadDemGrid)).then(() => {
+    if (globe.on && !globe.busy) buildOverlays();
+  });
+
+  // 마우스를 올린 지점의 고도
+  let pending = null;
+  const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  handler.setInputAction((move) => {
+    if (pending) {
+      pending = move.endPosition;
+      return;
+    }
+    pending = move.endPosition;
+    requestAnimationFrame(() => {
+      showElevationAt(pending);
+      pending = null;
+    });
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+  viewer.scene.canvas.addEventListener("pointerleave", () => (elevReadout.hidden = true));
+}
+
+function showElevationAt(screenPos) {
+  elevReadout.hidden = true;
+  if (!elevToggle.checked || !screenPos) return;
+  const hit = viewer.scene.pickPosition(screenPos);
+  if (!Cesium.defined(hit)) return;
+  const carto = Cesium.Cartographic.fromCartesian(hit, Cesium.Ellipsoid.MARS);
+  if (!carto) return;
+  const lon = Cesium.Math.toDegrees(carto.longitude);
+  const lat = Cesium.Math.toDegrees(carto.latitude);
+  const elev = demElevation(lon, lat);
+  if (!elev) return; // DEM 범위(400 km) 밖
+
+  elevReadout.innerHTML = `고도 ${formatElevation(elev.m)}<small>${formatLonLat({ lon, lat })} · ${DEM_LABELS[elev.source]}</small>`;
+  elevReadout.style.transform = `translate(${screenPos.x + 16}px, ${screenPos.y + 16}px)`;
+  elevReadout.hidden = false;
+}
+
+function renderElevationLegend() {
+  const gradient = `linear-gradient(to right, ${DEM_DATA.colormap.join(", ")})`;
+  elevLegend.innerHTML =
+    ELEVATION_KEYS.map((key) => {
+      const [lo, hi] = DEM_DATA[key].reliefRange;
+      return `<span class="globe-elev__name">${ELEVATION_NAMES[key]}</span>
+        <span class="globe-elev__ramp" style="background:${gradient}"></span>
+        <span class="globe-elev__range"><span>${formatElevation(lo)}</span><span>${formatElevation(hi)}</span></span>`;
+    }).join("") + `<span class="globe-elev__note">마우스를 올리면 그 지점의 고도가 보여요. 두 범위는 색 기준이 달라요.</span>`;
+}
+
+elevToggle.addEventListener("change", () => {
+  const on = elevToggle.checked;
+  if (elevation.source) elevation.source.show = on;
+  elevLegend.hidden = !on;
+  elevReadout.hidden = true;
+  if (viewer && globe.on) buildOverlays();
+});
+
+// 포인트 이름 아래에 붙일 고도 (고도 표시가 켜져 있고 DEM 범위 안일 때)
+function withElevation(text, lon, lat) {
+  const elev = elevToggle.checked ? demElevation(lon, lat) : null;
+  return elev ? `${text}\n${formatElevation(elev.m)}` : text;
 }
 
 // ---------- 좌표 ----------
@@ -133,7 +231,7 @@ function addPin(lon, lat, text, color, { big = false, alwaysLabel = false } = {}
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     label: {
-      text,
+      text: withElevation(text, lon, lat),
       font: `${big ? "bold 14px" : "600 12px"} sans-serif`,
       fillColor: Cesium.Color.WHITE,
       outlineColor: Cesium.Color.BLACK,

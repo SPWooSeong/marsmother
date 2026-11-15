@@ -4,7 +4,7 @@
 // ---------- 지도 (확대/축소, 이동, 축척) ----------
 // 지역 정보(REGIONS)와 포인트 데이터는 js/data/points.js 에 있음
 let currentRegion = "gusev";
-// 예시 지도: Columbia Hills 가시광 모자이크 축소본 (가로 약 29.99 km)
+// 기본 지도: Columbia Hills 가시광 모자이크 (HiRISE · CTX · HRSC) 축소본 (가로 약 29.99 km)
 const MAP_WIDTH_M = REGIONS.gusev.widthM;
 
 const mapEl = document.getElementById("map");
@@ -17,9 +17,11 @@ const view = { x: 0, y: 0, scale: 1, fitScale: 1, minScale: 0.1, maxScale: 10 };
 
 function applyView() {
   mapLayer.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  mapLayer.style.setProperty("--inv-scale", 1 / view.scale); // 경로선 굵기를 화면 기준으로 유지
   updateScaleBar();
   positionPins();
   scheduleTiles();
+  if (typeof scheduleScienceLayers === "function") scheduleScienceLayers(); // 과학 레이어 (layers.js)
   if (typeof positionLocPatch === "function") positionLocPatch(); // 위치 추정용 고해상도 패치 (localize.js)
 }
 
@@ -765,7 +767,7 @@ function openPhotoViewer(point) {
   img.src = panorama;
 
   // 아래: 그 외 사진
-  pvGalleryTitle.textContent = `그 외 사진 (${gallery.length})`;
+  pvGalleryTitle.textContent = `궤도 사진 · 가시광 모자이크 0.25 m/px (${gallery.length})`;
   pvGallery.replaceChildren(
     ...gallery.map((src, i) => {
       const btn = document.createElement("button");
@@ -894,7 +896,7 @@ function setDrawerOpen(open) {
 
 menuBtn.addEventListener("click", () => setDrawerOpen(true));
 drawerCloseBtn.addEventListener("click", () => setDrawerOpen(false));
-drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
+// 메뉴 밖을 눌러도 닫히지 않음 (메뉴를 연 채로 지도를 조작할 수 있게). 닫기: × 버튼 · Esc
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setDrawerOpen(false);
 });
@@ -911,7 +913,7 @@ drawerTabs.forEach((tab) => {
     });
   });
 });
-// TODO: 레이어 체크박스에 맞춰 지도 레이어 켜고 끄기
+// 레이어 체크박스에 맞춰 지도 레이어 켜고 끄기: js/layers.js
 
 // ---------- 탐색 지역 선택 ----------
 const regionBtn = document.getElementById("region-btn");

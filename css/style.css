@@ -50,7 +50,7 @@ button {
   left: 0;
   z-index: 1; /* 배경 타일 위 */
   transform-origin: 0 0;
-  will-change: transform;
+  /* will-change: transform 을 두면 처음 배율로 그린 그림을 늘려서 보여 줘서 확대 시 경로선이 깨짐 → 쓰지 않음 */
 }
 
 /* 화성 전체 배경 타일 (Gusev 고해상도 사진 아래) */
@@ -89,6 +89,16 @@ button {
   cursor: crosshair;
 }
 
+/* 과학 레이어: 화면 크기 캔버스 (지도 사진 위, 핀 아래) */
+.map__science {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
 /* 경로 (지도 레이어 안, 지도와 함께 확대/축소) */
 .map__routes {
   position: absolute;
@@ -98,13 +108,13 @@ button {
   overflow: visible;
 }
 
+/* 선 굵기: 지도 확대(CSS transform)와 상관없이 화면에서 같은 굵기 (--inv-scale = 1 / 지도 배율, main.js applyView) */
 .map-route {
   fill: none;
-  stroke-width: 3;
+  stroke-width: calc(3px * var(--inv-scale, 1));
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 8 5;
-  vector-effect: non-scaling-stroke;
+  stroke-dasharray: calc(8px * var(--inv-scale, 1)) calc(5px * var(--inv-scale, 1));
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
 }
 
@@ -306,8 +316,9 @@ button {
   position: absolute;
   inset: 0;
   z-index: 100;
-  /* 길찾기 결과가 지도에서 보이도록 옅게 */
-  background: rgba(0, 0, 0, 0.15);
+  /* 메뉴를 열어 둔 채로도 지도를 조작할 수 있게: 화면을 어둡게 덮지 않고 입력도 막지 않음 (닫기는 × 버튼 · Esc) */
+  background: none;
+  pointer-events: none;
 }
 
 .drawer {
@@ -446,6 +457,207 @@ button {
 
 .layer-list input.is-blue { accent-color: #2f7bff; }
 .layer-list input.is-red { accent-color: #ff4a4a; }
+
+.layer-list input:disabled { cursor: default; }
+
+/* 레이어 그룹 (포인트 탭의 그룹과 같은 모양: 제목을 누르면 접기/펼치기, 체크박스는 그룹 전체) */
+.layer-group + .layer-group {
+  margin-top: 6px;
+}
+
+.layer-group__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.layer-group__title:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.layer-group__title::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pin-color);
+}
+
+.layer-group__fold {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layer-group__fold::after {
+  content: "▾";
+  margin-left: auto;
+  margin-right: 4px;
+  font-size: 12px;
+  color: rgba(244, 233, 225, 0.6);
+  transition: transform 0.15s;
+}
+
+.layer-group.is-collapsed .layer-group__fold::after {
+  transform: rotate(-90deg);
+}
+
+.layer-group.is-collapsed .layer-list {
+  display: none;
+}
+
+.layer-group.is-collapsed .layer-group__title {
+  margin-bottom: 0;
+}
+
+.layer-group__toggle {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--pin-color);
+  cursor: pointer;
+}
+
+.layer-group .layer-list {
+  padding-left: 12px;
+}
+
+.layer-group .layer-list label {
+  padding: 8px 6px;
+  font-size: 14px;
+}
+
+/* 지도 전체를 색으로 덮는 레이어 표시 (한 종류만 켜짐) */
+.layer-tag {
+  margin-left: 6px;
+  margin-right: auto;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(244, 233, 225, 0.65);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.layer-list__group {
+  margin: 12px 6px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(244, 233, 225, 0.5);
+}
+
+.layer-list__group:first-child { margin-top: 0; }
+
+/* 켜진 레이어 아래 범례 */
+.layer-legend {
+  display: none;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 0 6px 8px;
+  font-size: 12px;
+  color: rgba(244, 233, 225, 0.75);
+}
+
+.layer-list li:has(input:checked) > .layer-legend { display: flex; }
+
+.layer-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.layer-legend__swatch {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--c);
+}
+
+.layer-legend__swatch.is-dot { border-radius: 50%; }
+.layer-legend__swatch.is-line { height: 3px; border-radius: 2px; }
+
+.layer-legend__ramp {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+}
+
+.layer-legend__ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.layer-legend__note {
+  width: 100%;
+  color: rgba(244, 233, 225, 0.5);
+}
+
+/* 고도(DEM) 레이어 공용 범례 + 색 기준 전환 */
+.dem-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 6px 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 12px;
+  color: rgba(244, 233, 225, 0.75);
+}
+
+.dem-control[hidden] {
+  display: none;
+}
+
+.dem-control__modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 4px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.dem-control__modes button {
+  padding: 5px 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(244, 233, 225, 0.7);
+  font: inherit;
+  cursor: pointer;
+}
+
+.dem-control__modes button.is-active {
+  background: rgba(125, 249, 196, 0.2);
+  color: #7df9c4;
+  font-weight: 600;
+}
+
+.layer-note {
+  margin: 8px 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(244, 233, 225, 0.5);
+}
 
 .layer-list__divider {
   height: 1px;
@@ -751,21 +963,20 @@ button {
 /* 지도 위 길찾기 경로 */
 .nav-route {
   fill: none;
-  stroke-width: 3;
+  stroke-width: calc(3px * var(--inv-scale, 1));
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-opacity: 0.45;
-  vector-effect: non-scaling-stroke;
 }
 
 .nav-route.is-selected {
-  stroke-width: 5;
+  stroke-width: calc(5px * var(--inv-scale, 1));
   stroke-opacity: 1;
 }
 
 .nav-route--outline {
   stroke: rgba(0, 0, 0, 0.7);
-  stroke-width: 9;
+  stroke-width: calc(9px * var(--inv-scale, 1));
   stroke-opacity: 1;
 }
 
@@ -1845,8 +2056,7 @@ body.is-hud .hud-card__close {
 .hud-card__preview {
   position: relative;
   overflow: hidden;
-  background: url("../assets/photos/pano-1.jpg") center / cover;
-  filter: sepia(0.7) saturate(1.6) hue-rotate(-18deg);
+  background: url("../assets/sites/here-pano.jpg") center / cover;
 }
 
 .hud-card__preview.is-minimap {
@@ -1930,6 +2140,264 @@ body.is-3d .scale-bar {
 
 .globe-loading[hidden] {
   display: none;
+}
+
+/* 오른쪽 위 시계 (화성 지방시 · 계절 · 지구 시각) + 시각 바꾸기 */
+.time-widget {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  z-index: 10;
+  width: 232px;
+  color: #f4e9e1;
+}
+
+.time-widget__btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 14px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(20, 12, 8, 0.82);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.time-widget__btn:hover {
+  border-color: rgba(125, 249, 196, 0.5);
+}
+
+.time-widget__main {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.time-widget__mars {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-widget__unit {
+  font-size: 12px;
+  color: rgba(244, 233, 225, 0.7);
+}
+
+.time-widget__live {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: 8px;
+  background: rgba(125, 249, 196, 0.18);
+  color: #7df9c4;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.time-widget__live.is-fixed {
+  background: rgba(255, 209, 102, 0.2);
+  color: #ffd166;
+}
+
+.time-widget__sub {
+  font-size: 12px;
+  color: rgba(244, 233, 225, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+
+.time-widget__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(20, 12, 8, 0.94);
+  font-size: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.time-widget__panel[hidden] {
+  display: none;
+}
+
+.time-widget__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: rgba(244, 233, 225, 0.7);
+}
+
+.time-widget__field input {
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  color-scheme: dark;
+}
+
+.time-widget__steps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.time-widget__steps button,
+.time-widget__now {
+  padding: 6px 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.time-widget__steps button:hover,
+.time-widget__now:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.time-widget__now {
+  border-color: rgba(125, 249, 196, 0.45);
+  color: #7df9c4;
+  font-weight: 600;
+}
+
+.time-widget__rad {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(244, 233, 225, 0.7);
+}
+
+.time-widget__rad strong {
+  font-size: 16px;
+  color: #ff9d6c;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-widget__detail {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: rgba(244, 233, 225, 0.6);
+}
+
+.time-widget__detail li {
+  display: flex;
+  justify-content: space-between;
+}
+
+.time-widget__detail b {
+  color: rgba(244, 233, 225, 0.9);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 3D 지도 고도 표시: 오른쪽 위 범례 + 마우스 위치 고도 */
+.globe-elev {
+  position: absolute;
+  top: 116px; /* 시계 아래 */
+  right: 24px;
+  z-index: 2;
+  width: 230px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(20, 12, 8, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #f4e9e1;
+  font-size: 12px;
+}
+
+.globe-elev__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.globe-elev__toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #7df9c4;
+  cursor: pointer;
+}
+
+.globe-elev__legend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+.globe-elev__legend[hidden] {
+  display: none;
+}
+
+.globe-elev__name {
+  margin-top: 4px;
+  color: rgba(244, 233, 225, 0.75);
+}
+
+.globe-elev__ramp {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.globe-elev__range {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+.globe-elev__note {
+  margin-top: 6px;
+  color: rgba(244, 233, 225, 0.5);
+  line-height: 1.4;
+}
+
+.globe-elev__readout {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(10, 8, 6, 0.85);
+  border: 1px solid rgba(125, 249, 196, 0.5);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.globe-elev__readout[hidden] {
+  display: none;
+}
+
+.globe-elev__readout small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.65);
 }
 
 .globe-hint {
@@ -2429,10 +2897,34 @@ body.is-3d .scale-bar {
   display: none;
 }
 
+/* HUD: 현재 위치 보정 버튼 (미니맵 바로 위) */
+.hud-locate-btn {
+  position: absolute;
+  left: 24px;
+  bottom: 168px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid rgba(76, 201, 240, 0.55);
+  border-radius: 20px;
+  background: rgba(10, 14, 20, 0.72);
+  color: #bfefff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hud-locate-btn:hover {
+  background: rgba(76, 201, 240, 0.2);
+}
+
 .hud-source {
   position: absolute;
   right: 24px;
-  top: 24px;
+  top: 116px; /* 시계 아래 */
   z-index: 2;
   padding: 3px 10px;
   border-radius: 10px;

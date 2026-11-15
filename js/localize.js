@@ -1,4 +1,4 @@
-// Mars Mother - 현재 위치 찾기 (지형 매칭 기반 전역 위치 추정, 데모)
+// Mars Mother - 현재 위치 찾기 (지형 매칭 기반 전역 위치 추정 · 실제 Spirit Navcam 사진 + 궤도 사진)
 //
 // 참고 논문: Nash et al., "Censible: A Robust and Practical Global Localization Framework
 //            for Planetary Surface Missions", ICRA 2024 (NASA JPL, Perseverance 탑재)
@@ -565,6 +565,7 @@ function applyLocalization(found) {
   const region = REGIONS[currentRegion];
   region.currentPosition = { lon: found.lon, lat: found.lat };
   if (typeof renderNavMap === "function") renderNavMap();
+  document.dispatchEvent(new CustomEvent("positionchange"));
   locPatchEl.src = region.localize.orbit;
   locPatchEl.dataset.ready = "1";
   positionLocPatch();
@@ -589,6 +590,7 @@ function positionLocPatch() {
 locBtn.addEventListener("click", () => {
   if (locDialog.open) return;
   setDrawerOpen(false);
+  locShowBtn.textContent = typeof hud !== "undefined" && hud.on ? "HUD 로 돌아가기" : "지도에서 보기";
   locDialog.showModal();
   runLocalization();
 });
@@ -602,6 +604,8 @@ locShowBtn.addEventListener("click", () => {
   locDialog.close();
   const here = loc.result?.found;
   if (!here) return;
+
+  if (typeof hud !== "undefined" && hud.on) return; // HUD: 보정된 위치에서 바로 이어서 봄
 
   if (typeof globe !== "undefined" && globe.on && viewer) {
     viewer.camera.flyTo({
