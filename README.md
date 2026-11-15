@@ -5,8 +5,6 @@
 This project was developed as a submission to the 2026 NASA Space Apps Challenge. Details about the challenge topic can be found at the link below.<br>
 https://www.spaceappschallenge.org/2026/challenges/interplanetary-survival-guide-martian-map/
 <br>
-## Website
-https~~~~
 
 ## Website
 https://marsmother-snowy.vercel.app/
