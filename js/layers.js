@@ -142,6 +142,8 @@ const IMAGE_LAYERS = {
   // 환경 필드 (js/environment.js) — 색의 투명도는 캔버스에 들어 있음
   return_limit: { render: renderReturnCanvas, bounds: DEM_DATA.hirise.bounds, alpha: 1 },
   comm_view: { render: renderCommCanvas, bounds: DEM_DATA.hirise.bounds, alpha: 1 },
+  // HUD 와 같은 기준의 위험도 (js/hud.js — 이 파일보다 늦게 실행되므로 그릴 때 부름)
+  hazard_level: { render: () => renderHazardCanvas(), bounds: DEM_DATA.hirise.bounds, alpha: 1 },
 };
 
 // ---------- 고도(DEM) 레이어: 고도 격자를 브라우저에서 직접 칠함 ----------
@@ -639,6 +641,21 @@ const ENV_LEGENDS = {
         `기준점: ${info.origin.isBase ? "기지 " : ""}${info.origin.name} · 왕복 가능 범위 약 ${info.reachKm2.toFixed(1)} km² (최대 ${(info.maxM / 1000).toFixed(1)} km). ` +
         `예산: 산소 ${Math.round(profileUsableO2L())} L · ${limiter} (안전 여유 ${PROFILE.marginPct}% 제외` +
         `${b.sun.isDay ? "" : ", 지금은 밤 — 일몰 제한 미적용"}). 나의 정보 · 시계를 바꾸면 다시 계산해요.`,
+    };
+  },
+  hazard_level: () => {
+    const s = typeof hazardLayerStats !== "undefined" ? hazardLayerStats : null;
+    const total = s ? s.safe + s.caution + s.danger : 0;
+    const pct = (n) => `${Math.round((n / total) * 100)}%`;
+    return {
+      items: [
+        { color: "rgba(255,216,77,0.8)", label: "주의 — 경사 · 무른 모래 · 거친 지면 · 그늘" },
+        { color: "rgba(255,77,77,0.85)", label: "위험 — 급경사 · 모래 함몰 · 바위 많음" },
+      ],
+      note:
+        "HUD 에서 보이는 위험 표시와 같은 기준이에요 (경사 한계는 나의 정보 값). 30 m 칸 단위 · 안전한 곳은 투명. " +
+        (total ? `Columbia Hills 30 km 중 주의 ${pct(s.caution)} · 위험 ${pct(s.danger)}` : "계산 중…") +
+        (s && s.night ? " · 지금은 밤이라 그늘은 빼고 계산" : ""),
     };
   },
   comm_view: () => ({

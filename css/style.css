@@ -845,12 +845,12 @@ button {
 /* 지도 위 현위치 (파란 점) */
 .here-dot {
   position: absolute;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: #4cc9f0;
-  border: 3px solid #fff;
+  background: #2f62ff;
+  border: 4px solid #fff;
   box-shadow: 0 0 0 0 rgba(76, 201, 240, 0.6);
   animation: here-pulse 2s infinite;
 }
@@ -1077,14 +1077,6 @@ button {
   color: rgba(244, 233, 225, 0.75);
 }
 
-.route-card__walked {
-  padding: 5px 8px;
-  border-radius: 6px;
-  background: rgba(61, 220, 151, 0.12);
-  font-size: 11px;
-  line-height: 1.4;
-  color: #9ff0c8;
-}
 
 /* 지점 조사: 지도를 클릭한 자리의 핀 + 오른쪽 정보 창 (js/inspect.js) */
 .inspect {
@@ -1138,9 +1130,6 @@ body.is-3d .inspect-panel { display: none; }
 body.is-inspect-open:not(.is-hud):not(.is-3d) .map-controls,
 body.is-inspect-open:not(.is-hud):not(.is-3d) .time-widget { right: calc(min(340px, 85vw) + 24px); }
 body.is-inspect-open:not(.is-hud):not(.is-3d) .scale-bar { right: calc(min(340px, 85vw) + 92px); }
-/* 가운데 위 지역 선택도 남은 지도 영역의 가운데로 (밀려온 시계와 겹치지 않게) */
-.region-select { transition: left 0.25s ease; }
-body.is-inspect-open:not(.is-hud):not(.is-3d) .region-select { left: calc(50% - min(340px, 85vw) / 2); }
 
 .inspect__head {
   display: flex;
@@ -1806,84 +1795,6 @@ body.is-inspect-open:not(.is-hud):not(.is-3d) .region-select { left: calc(50% - 
   }
 }
 
-/* 가운데 위 탐색 지역 선택 */
-.region-select {
-  position: absolute;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-}
-
-.region-select__btn {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 48px;
-  padding: 0 18px;
-  border-radius: 24px;
-  background: rgba(20, 12, 8, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(6px);
-  white-space: nowrap;
-}
-
-.region-select__btn:hover {
-  border-color: rgba(255, 255, 255, 0.4);
-}
-
-.region-select__label {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: rgba(244, 233, 225, 0.6);
-}
-
-.region-select__name {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.region-select__caret {
-  font-size: 12px;
-  transition: transform 0.15s;
-}
-
-.region-select__btn[aria-expanded="true"] .region-select__caret {
-  transform: rotate(180deg);
-}
-
-.region-select__list {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  min-width: 100%;
-  list-style: none;
-  padding: 6px;
-  border-radius: 14px;
-  background: rgba(20, 12, 8, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(6px);
-}
-
-.region-select__list li {
-  padding: 10px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.region-select__list li:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.region-select__list li[aria-selected="true"] {
-  color: #7df9c4;
-  font-weight: 700;
-}
-
 /* 왼쪽 아래 HUD 카드 */
 .hud-card {
   position: absolute;
@@ -2009,8 +1920,6 @@ body.is-drawer-open .hud-locate-btn {
 
 @media (max-width: 480px) {
   .menu-btn { top: 16px; left: 16px; }
-  .region-select { top: 16px; }
-  .region-select__label { display: none; }
   .hud-card { left: 16px; bottom: 16px; width: 160px; height: 100px; }
   .map-controls { right: 16px; bottom: 16px; }
   .scale-bar { right: 80px; bottom: 16px; }
@@ -2025,7 +1934,6 @@ body.is-hud .map,
 body.is-hud .map-pins,
 body.is-hud .scale-bar,
 body.is-hud .map-controls,
-body.is-hud .region-select,
 body.is-hud .add-hint,
 body.is-hud .hud-card__close {
   display: none;
@@ -2642,98 +2550,6 @@ body.is-3d .scale-bar {
   font-variant-numeric: tabular-nums;
 }
 
-/* 3D 지도 고도 표시: 오른쪽 위 범례 + 마우스 위치 고도 */
-.globe-elev {
-  position: absolute;
-  top: 116px; /* 시계 아래 */
-  right: 24px;
-  z-index: 2;
-  width: 230px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(20, 12, 8, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #f4e9e1;
-  font-size: 12px;
-}
-
-.globe-elev__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.globe-elev__toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: #7df9c4;
-  cursor: pointer;
-}
-
-.globe-elev__legend {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  margin-top: 10px;
-}
-
-.globe-elev__legend[hidden] {
-  display: none;
-}
-
-.globe-elev__name {
-  margin-top: 4px;
-  color: rgba(244, 233, 225, 0.75);
-}
-
-.globe-elev__ramp {
-  height: 8px;
-  border-radius: 4px;
-}
-
-.globe-elev__range {
-  display: flex;
-  justify-content: space-between;
-  font-variant-numeric: tabular-nums;
-}
-
-.globe-elev__note {
-  margin-top: 6px;
-  color: rgba(244, 233, 225, 0.5);
-  line-height: 1.4;
-}
-
-.globe-elev__readout {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 3;
-  padding: 5px 10px;
-  border-radius: 8px;
-  background: rgba(10, 8, 6, 0.85);
-  border: 1px solid rgba(125, 249, 196, 0.5);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.globe-elev__readout[hidden] {
-  display: none;
-}
-
-.globe-elev__readout small {
-  display: block;
-  font-size: 11px;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.65);
-}
-
 .globe-hint {
   position: absolute;
   bottom: 30px;
@@ -3256,15 +3072,201 @@ body.is-3d .scale-bar {
   background: rgba(76, 201, 240, 0.2);
 }
 
-.hud-source {
+
+/* 마우스 위치 위도·경도 (2D 지도 오른쪽 아래 구석) */
+.cursor-coord {
   position: absolute;
   right: 24px;
-  top: 116px; /* 시계 아래 */
-  z-index: 2;
-  padding: 3px 10px;
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.45);
+  bottom: 4px;
+  z-index: 5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(20, 12, 8, 0.6);
+  color: rgba(244, 233, 225, 0.85);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
+  font-variant-numeric: tabular-nums;
   pointer-events: none;
+}
+
+.cursor-coord[hidden],
+body.is-3d .cursor-coord,
+body.is-hud .cursor-coord {
+  display: none;
+}
+
+/* 길찾기: 고른 길로 안내 시작 (결과 맨 위) */
+.route-start {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 8px;
+  background: linear-gradient(#262626 80%, transparent);
+}
+
+.route-start__btn {
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--route-color, #4c8dff);
+  color: #1a0f0a;
+  font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+.route-start__btn:hover {
+  filter: brightness(1.1);
+}
+
+.route-start__hint {
+  font-size: 11px;
+  text-align: center;
+  color: rgba(244, 233, 225, 0.5);
+}
+
+/* =========================================================
+   HUD 모드: 시계는 간략하게 + 화면 크기가 바뀌어도 위·아래 요소가 겹치지 않게
+   위쪽 줄 = 왼쪽 메뉴 버튼 · 가운데 방위 표시줄 · 오른쪽 시계
+   ========================================================= */
+/* 시계: HUD 에서는 화성 시각 한 줄만 (계절 · 지구 시각 · '화성 지방시' 글자 숨김) */
+body.is-hud .time-widget { width: auto; }
+body.is-hud .time-widget__sub,
+body.is-hud .time-widget__unit { display: none; }
+body.is-hud .time-widget__btn { padding: 6px 12px; }
+
+/* 방위 표시줄은 양옆(메뉴 버튼 / 간략한 시계)과 같은 여백을 두고 가운데에 */
+body.is-hud .hud-compass {
+  width: min(620px, calc(100vw - 2 * (150px + 24px + 12px)));
+}
+
+@media (max-width: 1100px) {
+  /* 경로 안내 카드는 전방 상태 아래로 */
+  body.is-hud .hud-guide { top: 136px; }
+}
+
+@media (max-width: 900px) {
+  /* 아래쪽 조작 안내(키보드)는 좁은 화면에서 숨김 — 왼쪽 HUD 창 · 오른쪽 상태 링과 겹침 */
+  body.is-hud .hud-hint { display: none; }
+}
+
+@media (max-width: 640px) {
+  /* 폰 크기: 위쪽 줄에는 메뉴 버튼 · 시계만, 방위 표시줄은 그 아래 한 줄 전체 */
+  body.is-hud .hud-compass { top: 84px; width: calc(100vw - 32px); }
+  body.is-hud .hud-guide { top: 200px; left: 12px; right: 12px; min-width: 0; }
+}
+
+/* 2D 지도: 현위치에서 바라보는 방향 (부채꼴, 멀수록 흐려짐) */
+.here-cone {
+  position: absolute;
+  width: 110px;
+  height: 110px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  /* 0° = 위(북쪽)에서 시계 방향 — 바라보는 방향을 가운데로 40° 폭 */
+  background: conic-gradient(
+    from calc(var(--heading, 0deg) - 20deg),
+    rgba(47, 98, 255, 0.85) 0deg 40deg,
+    transparent 40deg 360deg
+  );
+  -webkit-mask-image: radial-gradient(circle, #000 12%, rgba(0, 0, 0, 0.55) 45%, transparent 70%);
+  mask-image: radial-gradient(circle, #000 12%, rgba(0, 0, 0, 0.55) 45%, transparent 70%);
+  pointer-events: none;
+}
+
+/* HUD 에서 잠깐 2D 지도를 보는 중: 왼쪽 창의 × = HUD 로 돌아가기 (눈에 띄게) */
+body.is-hud-peek .hud-card__close {
+  background: rgba(125, 249, 196, 0.25);
+  color: #7df9c4;
+}
+
+/* =========================================================
+   HUD 발밑 지형 정보 — 위 가운데 상태 묶음(방위 → 전방 상태) 바로 아래의 작은 유리 캡슐 (Apple 스타일)
+   방위 표시줄(.hud-compass) 안에 있어서 화면 크기에 따라 함께 움직임
+   ========================================================= */
+.hud-terrain {
+  position: absolute;
+  top: calc(100% + 70px); /* 전방 상태 아래 */
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  padding: 6px 12px 6px 14px;
+  border-radius: 16px;
+  background: rgba(28, 28, 30, 0.5);
+  border: 0.5px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28), inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Apple SD Gothic Neo", sans-serif;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.hud-terrain__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* 항목 사이 얇은 구분선 */
+.hud-terrain__item + .hud-terrain__item {
+  padding-left: 12px;
+  border-left: 0.5px solid rgba(255, 255, 255, 0.18);
+}
+
+.hud-terrain__label {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(235, 235, 245, 0.6);
+}
+
+.hud-terrain__value {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 모래 빠짐 위험: Apple 시스템 색 (초록 · 노랑 · 빨강) */
+.hud-terrain__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #30d158;
+}
+.hud-terrain__dot.is-moderate { background: #ffd60a; }
+.hud-terrain__dot.is-high { background: #ff453a; }
+
+.hud-terrain__src {
+  padding: 2px 7px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 9.5px;
+  font-weight: 500;
+  color: rgba(235, 235, 245, 0.7);
+}
+
+.hud-terrain__msg {
+  font-size: 12px;
+  color: rgba(235, 235, 245, 0.75);
+}
+
+@media (max-width: 1100px) {
+  .hud-terrain__src { display: none; }
+  /* 경로 안내 카드는 지형 정보 캡슐 아래로 */
+  body.is-hud .hud-guide { top: 186px; }
+}
+
+@media (max-width: 640px) {
+  body.is-hud .hud-guide { top: 250px; }
 }

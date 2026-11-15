@@ -67,6 +67,7 @@ hudScene.style.backgroundImage = `url("${HUD_PANO}")`;
 
 // ---------- 모드 전환 ----------
 function setHudMode(on) {
+  if (on) setHudPeek(false);
   hud.on = on;
   document.body.classList.toggle("is-hud", on);
   hudView.hidden = !on;
@@ -95,7 +96,35 @@ function setHudMode(on) {
   }
 }
 
-hudPreview.addEventListener("click", () => setHudMode(!hud.on));
+// HUD 에서 왼쪽 창을 누르면 2D 지도를 잠깐 보여 줌 (peek). 그 창을 닫거나(×) 다시 누르면 HUD 로 돌아감
+const hudPeekCloseBtn = document.getElementById("hud-close-btn");
+function setHudPeek(on) {
+  hud.peek = on;
+  document.body.classList.toggle("is-hud-peek", on);
+  if (on) hudCardTitle.textContent = "HUD 로 돌아가기";
+  hudPeekCloseBtn.setAttribute("aria-label", on ? "2D 지도 닫고 HUD 로 돌아가기" : "HUD 창 닫기");
+  hudPeekCloseBtn.title = on ? "닫고 HUD 로 돌아가기" : "";
+}
+
+hudPreview.addEventListener("click", () => {
+  if (hud.on) {
+    setHudMode(false);
+    setHudPeek(true);
+  } else {
+    setHudMode(true);
+  }
+});
+
+// 2D 를 잠깐 보는 중이면 × 는 창을 숨기지 않고 HUD 로 돌아감 (main.js 의 '창 숨기기' 보다 먼저 처리)
+hudPeekCloseBtn.addEventListener(
+  "click",
+  (e) => {
+    if (!hud.peek) return;
+    e.stopImmediatePropagation();
+    setHudMode(true);
+  },
+  true
+);
 
 // 현재 위치 보정: 2D 지도의 ◎ 버튼과 같은 '지형 매칭 위치 추정' 창을 엶 (js/localize.js)
 document.getElementById("hud-locate-btn").addEventListener("click", () => locBtn.click());
@@ -200,6 +229,100 @@ function hazardReason(level, slopeDeg) {
   return `${level === "danger" ? "급경사" : "경사"} ${Math.round(slopeDeg)}°`;
 }
 
+// ---------- 레이어 데이터까지 합친 위험도 ----------
+// 길찾기(js/route.js)와 같은 지도 칸 자료를 씀 (js/survey.js · js/environment.js)
+//  - 경사: 실제 DEM
+//  - 모래 함몰: 열관성(TES)으로 추정한 모래 위험 레이어 → 지면 계수 eta (탐사한 칸은 실제로 잰 값)
+//  - 거친 지면 · 바위: 거칠기 / 암석 밀도 (발목 부상 위험)
+//  - 그늘: 지금 시각의 태양 위치로 계산한 그림자 (춥고 어두움, 밤에는 표시 안 함)
+// 가장 심한 요소가 그 칸의 위험 단계가 되고, 이유에는 그 단계의 요소를 함께 적음
+const SAND_DANGER_ETA = 1.8; // 열관성 모래 위험 '높음'
+const SAND_CAUTION_ETA = 1.4; // '보통'
+const ROUGH_DANGER = 0.65;
+const ROUGH_CAUTION = 0.4;
+const LEVEL_RANK = { safe: 0, caution: 1, danger: 2 };
+let hazardFrame = { shadow: null }; // 프레임마다 한 번만 구하는 값
+
+// 월드 좌표 (지역 중심 기준 동/북 m) → 경위도 (worldOf 의 반대)
+function worldToLonLat(e, n) {
+  const b = (REGIONS[currentRegion] || REGIONS.gusev).bounds;
+  const lat0 = (b.latMin + b.latMax) / 2;
+  const lon0 = (b.lonMin + b.lonMax) / 2;
+  return { lon: lon0 + e / (Math.cos((lat0 * Math.PI) / 180) * DEG_TO_M), lat: lat0 + n / DEG_TO_M };
+}
+
+function beginHazardFrame() {
+  let shadow = null;
+  if (typeof survey !== "undefined" && survey.loaded && typeof envShadowMap === "function" && typeof marsClock !== "undefined") {
+    const sm = envShadowMap(marsClock.now());
+    if (!sm.night) shadow = sm.map;
+  }
+  hazardFrame = { shadow };
+}
+
+// 한 지점의 위험도 { level, reason } (지형 자료가 아직 없으면 null)
+function hazardAtWorld(e, n) {
+  const slope = slopeAt(e, n);
+  if (slope == null) return null;
+  const factors = [{ level: hazardLevel(slope), text: hazardReason(hazardLevel(slope), slope) }];
+
+  if (typeof survey !== "undefined" && survey.loaded) {
+    const cell = envCellOf(worldToLonLat(e, n));
+    if (cell !== -1) cellHazardFactors(cell, hazardFrame.shadow, factors);
+  }
+
+  let level = "safe";
+  for (const f of factors) if (LEVEL_RANK[f.level] > LEVEL_RANK[level]) level = f.level;
+  const reasons = factors.filter((f) => f.level === level && level !== "safe").map((f) => f.text);
+  return { level, reason: reasons.slice(0, 2).join(" · ") };
+}
+
+// 지도 칸(30 m) 하나의 위험 요소 — 모래 · 거친 지면 · 그늘 (HUD 와 레이어 탭 '위험도' 레이어가 같이 씀)
+function cellHazardFactors(cell, shadowMap, out = []) {
+  const eta = survey.eta ? survey.eta[cell] : 1;
+  if (eta >= SAND_DANGER_ETA) out.push({ level: "danger", text: "모래 함몰 위험" });
+  else if (eta >= SAND_CAUTION_ETA) out.push({ level: "caution", text: "무른 모래" });
+
+  const rough = survey.rough ? survey.rough[cell] : 0;
+  if (rough >= ROUGH_DANGER) out.push({ level: "danger", text: "바위 많음 (발목 부상)" });
+  else if (rough >= ROUGH_CAUTION) out.push({ level: "caution", text: "거친 지면" });
+
+  if (shadowMap && shadowMap[cell]) out.push({ level: "caution", text: "그늘 (저온 · 어두움)" });
+  return out;
+}
+
+// ---------- 레이어 탭 '위험도 (HUD 와 같은 기준)' 레이어 ----------
+// 지도 칸마다 경사(30 m DEM) + 모래 + 거친 지면 + 그늘(지금 시각)로 HUD 와 같은 단계를 칠함
+//  안전 = 투명, 주의 = 노랑, 위험 = 빨강. 시계 · 나의 정보(경사 한계) · 탐사가 바뀌면 다시 칠함
+const HAZARD_LAYER_RGBA = { caution: [255, 216, 77, 120], danger: [255, 77, 77, 165] };
+let hazardLayerStats = null; // 범례에 쓰는 칸 비율
+
+function renderHazardCanvas() {
+  if (!survey.loaded) return envPaint("hazard", "", () => {});
+  const sm = envShadowMap(marsClock.now());
+  const shadow = sm.night ? null : sm.map;
+  const key = `${survey.version}|${sm.key}|${typeof PROFILE !== "undefined" ? PROFILE.slopeLimitDeg : ""}`;
+  const count = { safe: 0, caution: 0, danger: 0 };
+  const canvas = envPaint("hazard", key, (i, px, o) => {
+    let level = hazardLevel(survey.slope[i]);
+    if (level !== "danger") {
+      for (const f of cellHazardFactors(i, shadow)) if (LEVEL_RANK[f.level] > LEVEL_RANK[level]) level = f.level;
+    }
+    count[level]++;
+    const c = HAZARD_LAYER_RGBA[level];
+    if (!c) {
+      px[o + 3] = 0;
+      return;
+    }
+    px[o] = c[0];
+    px[o + 1] = c[1];
+    px[o + 2] = c[2];
+    px[o + 3] = c[3];
+  });
+  if (count.safe + count.caution + count.danger) hazardLayerStats = { ...count, night: sm.night };
+  return canvas;
+}
+
 function resizeHudCanvas() {
   const dpr = window.devicePixelRatio || 1;
   hudCanvas.width = hudView.clientWidth * dpr;
@@ -208,9 +331,11 @@ function resizeHudCanvas() {
 }
 window.addEventListener("resize", () => hud.on && resizeHudCanvas());
 
-// 실제 DEM 경사로 주변 위험도를 표시하고, 시야 안에서 가장 가까운 위험/주의 구역을 돌려줌
+// 실제 DEM 경사 + 레이어 데이터(모래 · 거친 지면 · 그늘)로 주변 위험도를 표시하고,
+// 시야 안에서 가장 가까운 위험/주의 구역을 돌려줌
 function drawScan(L) {
   const ctx = hudCtx;
+  beginHazardFrame();
   ctx.clearRect(0, 0, L.W, L.H);
   const nearest = { caution: null, danger: null };
 
@@ -232,9 +357,9 @@ function drawScan(L) {
       const sx = pr.x;
       const sy = pr.y;
 
-      const slope = slopeAt(wx, wz);
-      if (slope == null) continue; // 지형 데이터를 아직 못 불러옴
-      const level = hazardLevel(slope);
+      const hz = hazardAtWorld(wx, wz);
+      if (!hz) continue; // 지형 데이터를 아직 못 불러옴
+      const level = hz.level;
       const near = 1 - d / SCAN_RANGE_M; // 가까울수록 1
       const alpha = Math.min(1, 0.25 + near * 0.6);
       ctx.fillStyle = `rgba(${HAZARD_COLORS[level]}, ${alpha})`;
@@ -248,7 +373,7 @@ function drawScan(L) {
 
         // 화면 가장자리에 너무 붙지 않은 것 중 가장 가까운 구역 기억
         if (sx > 80 && sx < L.W - 80 && (!nearest[level] || d < nearest[level].d)) {
-          nearest[level] = { d, sx, sy, reason: hazardReason(level, slope) };
+          nearest[level] = { d, sx, sy, reason: hz.reason };
         }
       }
     }
@@ -270,21 +395,20 @@ function updateCallouts(nearest) {
   }
 }
 
-// 바라보는 방향 바로 앞(3~25m)에서 처음 만나는 위험 요소 (실제 경사)
+// 바라보는 방향 바로 앞(3~25m)에서 처음 만나는 위험 요소 (경사 + 모래 · 거친 지면 · 그늘)
 function updateAhead() {
   const h = (hud.heading * Math.PI) / 180;
   let found = null;
   let hasData = false;
   for (let d = 3; d <= 25; d += 1) {
-    const slope = slopeAt(hud.world.e + Math.sin(h) * d, hud.world.n + Math.cos(h) * d);
-    if (slope == null) continue;
+    const hz = hazardAtWorld(hud.world.e + Math.sin(h) * d, hud.world.n + Math.cos(h) * d);
+    if (!hz) continue;
     hasData = true;
-    const level = hazardLevel(slope);
-    if (level === "danger") {
-      found = { level, d, reason: hazardReason(level, slope) };
+    if (hz.level === "danger") {
+      found = { level: hz.level, d, reason: hz.reason };
       break;
     }
-    if (level === "caution" && !found) found = { level, d, reason: hazardReason(level, slope) };
+    if (hz.level === "caution" && !found) found = { level: hz.level, d, reason: hz.reason };
   }
 
   const level = found ? found.level : "safe";
@@ -982,7 +1106,7 @@ function sceneY(e, n, h = terrainHeight(e, n)) {
   return h - TERRAIN_BASE_M - (de * de + dn * dn) / (2 * MARS_RADIUS_M);
 }
 
-// 오른쪽 위 지형 정보: 고도 · 발밑 경사 · 모래 빠짐 위험 · 데이터 출처
+// 아래 가운데 지형 정보 캡슐: 고도 · 발밑 경사 · 모래 빠짐 위험 · 데이터 출처
 let terrainStatusT = 0;
 function updateTerrainStatus(now) {
   if (now - terrainStatusT < 250) return;
@@ -990,15 +1114,18 @@ function updateTerrainStatus(now) {
   const { e, n } = hud.world;
   const g = gridAt(e, n);
   if (!g) {
-    hudTerrainStatus.textContent = hud3d.grids.length ? "DEM 범위 밖" : "지형 데이터 불러오는 중…";
+    hudTerrainStatus.innerHTML = `<span class="hud-terrain__msg">${hud3d.grids.length ? "DEM 범위 밖" : "지형 데이터 불러오는 중…"}</span>`;
     return;
   }
   const here = getCurrentPosition();
-  const sand = here && sandRiskAt(here.lon, here.lat)?.name;
-  hudTerrainStatus.textContent =
-    `고도 ${formatElevation(terrainHeight(e, n))} · 발밑 경사 ${slopeAt(e, n).toFixed(1)}°` +
-    (sand ? ` · 모래 빠짐 위험 ${sand}` : "") +
-    ` · ${DEM_LABELS[g.key]}`;
+  const sand = here && sandRiskAt(here.lon, here.lat);
+  const item = (label, value, extra = "") =>
+    `<div class="hud-terrain__item"><span class="hud-terrain__label">${label}</span><span class="hud-terrain__value">${extra}${value}</span></div>`;
+  hudTerrainStatus.innerHTML =
+    item("고도", formatElevation(terrainHeight(e, n))) +
+    item("발밑 경사", `${slopeAt(e, n).toFixed(1)}°`) +
+    (sand ? item("모래 빠짐", sand.name, `<i class="hud-terrain__dot is-${sand.risk}"></i>`) : "") +
+    `<span class="hud-terrain__src">${DEM_LABELS[g.key]}</span>`;
 }
 
 // ---------- 3D 지형 메시 ----------

@@ -542,7 +542,7 @@ function positionPins() {
 // 포인트 탭 목록 그리기 (종류별 그룹)
 function renderPointList() {
   const region = REGIONS[currentRegion];
-  pointRegionName.textContent = region ? region.name : regionName.textContent;
+  pointRegionName.textContent = region ? region.name : "";
   addPointBtn.disabled = !region;
   pointListEl.replaceChildren();
 
@@ -859,22 +859,24 @@ function openPhotoViewer(point) {
         onClick: () => showRoverPano(ph),
       }))
     : gallery.map((src) => ({ src, thumb: src }));
+  // 원본 사진 파일이 없는 항목은 아예 보여 주지 않음
+  const shown = items.filter((it) => it.src);
   if (photos) {
-    pvGalleryTitle.textContent = `Spirit Cam · Pancam / Navcam · NASA Photojournal (${items.filter((it) => it.src).length})`;
-    pvGalleryTitle.hidden = false;
+    pvGalleryTitle.textContent = `Spirit Cam · Pancam / Navcam · NASA Photojournal (${shown.length})`;
+    pvGalleryTitle.hidden = !shown.length;
   } else {
     pvGalleryTitle.textContent = `궤도 사진 · 가시광 모자이크 0.25 m/px (${items.length})`;
     pvGalleryTitle.hidden = !gallery.length; // 지점 조사(js/inspect.js)의 즉석 파노라마는 궤도 사진이 없음
   }
   pvGallery.classList.toggle("gallery__grid--wide", !!photos);
   pvGallery.replaceChildren(
-    ...items.map((it, i) => {
+    ...shown.map((it, i) => {
       const fig = document.createElement("figure");
       fig.className = "gallery__cell";
       const btn = document.createElement("button");
       btn.className = "gallery__item";
       btn.classList.toggle("is-color", !!it.color);
-      if (it.src) {
+      {
         btn.dataset.src = it.src;
         btn.setAttribute("aria-label", it.onClick ? `사진 ${i + 1} 파노라마로 보기` : `사진 ${i + 1} 크게 보기`);
         const thumb = document.createElement("img");
@@ -888,11 +890,6 @@ function openPhotoViewer(point) {
           pvLightbox.classList.toggle("is-color", !!it.color);
           pvLightbox.hidden = false;
         });
-      } else {
-        // 원본 JPEG 가 없는 사진: 출처 페이지만 연결
-        btn.disabled = true;
-        btn.classList.add("is-missing");
-        btn.textContent = "사진 파일 없음";
       }
       fig.append(btn);
       if (it.caption) {
@@ -1080,42 +1077,7 @@ drawerTabs.forEach((tab) => {
 });
 // 레이어 체크박스에 맞춰 지도 레이어 켜고 끄기: js/layers.js
 
-// ---------- 탐색 지역 선택 ----------
-const regionBtn = document.getElementById("region-btn");
-const regionName = document.getElementById("region-name");
-const regionList = document.getElementById("region-list");
-
-function setRegionListOpen(open) {
-  regionList.hidden = !open;
-  regionBtn.setAttribute("aria-expanded", String(open));
-}
-
-regionBtn.addEventListener("click", () => setRegionListOpen(regionList.hidden));
-
-regionList.addEventListener("click", (e) => {
-  const item = e.target.closest("li");
-  if (!item) return;
-
-  regionList.querySelectorAll("li").forEach((li) => li.removeAttribute("aria-selected"));
-  item.setAttribute("aria-selected", "true");
-  regionName.textContent = item.textContent;
-  setRegionListOpen(false);
-
-  currentRegion = item.dataset.region;
-  selectedPointId = null;
-  renderPointList();
-  renderMapOverlays();
-  document.dispatchEvent(new CustomEvent("regionchange"));
-  // TODO: item.dataset.region 에 맞는 지도 이미지 불러오기 (지금은 Gusev 지도만 있음)
-});
-
-// 목록 바깥을 누르거나 Esc를 누르면 닫기
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".region-select")) setRegionListOpen(false);
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") setRegionListOpen(false);
-});
+// 탐색 지역은 Gusev · Columbia Hills 로 고정 (지역 선택 버튼은 없앰)
 
 // ---------- HUD 창 (PiP) ----------
 const hudWindow = document.getElementById("hud-window");
@@ -1178,3 +1140,28 @@ function initMap() {
 renderPointList();
 if (mapImage.complete && mapImage.naturalWidth) initMap();
 else mapImage.addEventListener("load", initMap);
+
+
+// ---------- 마우스를 올린 곳의 위도·경도 (오른쪽 아래 구석) ----------
+const cursorCoordEl = document.getElementById("cursor-coord");
+let cursorCoordFrame = 0;
+mapEl.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "touch" || !mapImage.naturalWidth) return;
+  cancelAnimationFrame(cursorCoordFrame);
+  cursorCoordFrame = requestAnimationFrame(() => {
+    const rect = mapEl.getBoundingClientRect();
+    const ll = imageToLonLat((e.clientX - rect.left - view.x) / view.scale, (e.clientY - rect.top - view.y) / view.scale);
+    // 경도는 -180~180 으로 정리 (배경 지도가 옆으로 반복되므로)
+    const lon = ((((ll.lon + 180) % 360) + 360) % 360) - 180;
+    if (Math.abs(ll.lat) > 90) {
+      cursorCoordEl.hidden = true;
+      return;
+    }
+    cursorCoordEl.textContent = formatLonLat({ lon, lat: ll.lat });
+    cursorCoordEl.hidden = false;
+  });
+});
+mapEl.addEventListener("pointerleave", () => {
+  cancelAnimationFrame(cursorCoordFrame);
+  cursorCoordEl.hidden = true;
+});

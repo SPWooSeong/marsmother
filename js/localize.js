@@ -1,9 +1,14 @@
-// Mars Mother - 현재 위치 찾기 (지형 매칭 기반 전역 위치 추정 · 실제 Spirit Navcam 사진 + 궤도 사진)
+// Mars Mother - 현재 위치 찾기 (지형 매칭 기반 전역 위치 추정)
+//
+// 두 가지 모드
+//  - 기본 (◎ 버튼): 현위치 주변 위성 사진(HUD 고해상도 타일 0.25m)을 궤도 지도로 쓰고,
+//    숨겨진 '실제 위치' 의 위성 사진에 조명 차이·노이즈·스테레오 빈틈·바위 그림자를 입혀 관측을 흉내 냄 → 어디서나 동작
+//  - 시연 (실제 로버 사진으로 해보기): 아래의 실제 Spirit Navcam 사진으로 측정 (그 사진이 찍힌 곳에서만 가능)
 //
 // 참고 논문: Nash et al., "Censible: A Robust and Practical Global Localization Framework
 //            for Planetary Surface Missions", ICRA 2024 (NASA JPL, Perseverance 탑재)
 //
-// ★ 실제 데이터로 동작:
+// ★ 시연 모드는 실제 데이터로 동작:
 //   - 관측(로버가 본 주변 지형): NASA Spirit 로버 Navcam 이 sol 36 (2004-02-09) 에 360° 로 찍은 사진을
 //     위에서 본 지형으로 투영한 '수직 투영 모자이크' (NASA PDS, 제품 2NN036EFF04VRT00P1617L000M2)
 //   - 궤도 지도: data/ 의 Columbia Hills 가시광 모자이크 (HiRISE · CTX · HRSC)
@@ -18,7 +23,8 @@
 // 5) 서브픽셀 2차 보정 + 신뢰도               → 1D 2차 보정 + 유일성으로 신뢰도
 //
 // 사용하는 전역 값: REGIONS, currentRegion, formatLonLat, setDrawerOpen, view, mapEl, mapImage,
-//   flyMapTo, lonLatToImage (main.js) / renderNavMap (route.js) / globe, viewer (globe.js)
+//   flyMapTo, lonLatToImage (main.js) / renderNavMap, getCurrentPosition (route.js) / globe, viewer (globe.js)
+//   HUD_TILES (data/hud_tiles.js)
 
 // ---------- 설정 ----------
 const LOC = {
@@ -27,6 +33,8 @@ const LOC = {
   searchM: 40, // 검색 반경 = 추정 위치의 불확실성 (m)
   priorMinM: 15, // 시연용 '추정 위치' 가 정답에서 떨어진 거리 (무작위)
   priorMaxM: 35,
+  simHalfM: 100, // 기본 모드: 현위치 주변 ±100m 위성 사진을 궤도 지도로 사용
+  simResM: 0.5,
 };
 
 const POPCOUNT = new Uint8Array(256).map((_, i) => {
@@ -54,14 +62,20 @@ const locCanvases = {
 };
 const locSrcCanvas = document.getElementById("loc-src");
 const locOverviewCanvas = document.getElementById("loc-overview");
-const locSrcCoord = document.getElementById("loc-src-coord");
 const locResultEl = document.getElementById("loc-result");
 const locRetryBtn = document.getElementById("loc-retry");
 const locShowBtn = document.getElementById("loc-show");
 const locCloseBtn = document.getElementById("loc-close");
 const locPatchEl = document.getElementById("loc-patch");
+const locRealBtn = document.getElementById("loc-real");
+const locModeSub = document.getElementById("loc-mode-sub");
+const locSrcCap = document.getElementById("loc-src-cap");
+const locSourceInfo = document.getElementById("loc-source-info");
+const locOverviewCap = document.getElementById("loc-overview-cap");
+const locStep1 = document.getElementById("loc-step1");
 
-const loc = { data: null, running: false, result: null };
+// realData: 실제 로버 사진 데이터 (한 번만 불러옴), patch: 2D 지도에 겹칠 위성 사진 { src, bounds }
+const loc = { data: null, realData: null, running: false, result: null, mode: "sim", patch: null };
 
 // ---------- 데이터 불러오기 ----------
 function loadImg(src) {
@@ -104,7 +118,151 @@ async function loadLocalizeData(cfg) {
   const A = new Float32Array(m.w * m.h);
   for (let i = 0; i < A.length; i++) A[i] = m.data[i * 4];
 
-  return { cfg, S, obs, valid, N: m.w, A, orbitImg, viewImg };
+  return { mode: "real", cfg, S, obs, valid, N: m.w, A, orbitImg, viewImg };
+}
+
+// ---------- 기본 모드: 현위치 주변 위성 사진으로 가상 관측 만들기 ----------
+function gauss() {
+  let u = 0, v = 0;
+  while (!u) u = Math.random();
+  while (!v) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+// HUD 고해상도 타일(250m, 0.25m/px)을 이어 붙여 현위치 주변 정사각형 위성 사진을 만듦
+async function buildSimData(here) {
+  if (typeof HUD_TILES === "undefined") throw new Error("NO_TILES");
+  const T = HUD_TILES;
+  const b = T.bounds;
+  const tilePx = 250 / T.mPerPx;
+  const totalW = T.cols * tilePx;
+  const totalH = T.rows * tilePx;
+  const gx = ((here.lon - b.lonMin) / (b.lonMax - b.lonMin)) * totalW;
+  const gy = ((b.latMax - here.lat) / (b.latMax - b.latMin)) * totalH;
+  const halfPx = LOC.simHalfM / T.mPerPx;
+  if (gx - halfPx < 0 || gy - halfPx < 0 || gx + halfPx > totalW || gy + halfPx > totalH) throw new Error("OUT_OF_TILES");
+
+  const res = LOC.simResM;
+  const N = Math.round((2 * LOC.simHalfM) / res);
+  const k = T.mPerPx / res; // 타일 픽셀 → 격자 칸
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = N;
+  const g = canvas.getContext("2d");
+  const x0 = gx - halfPx, y0 = gy - halfPx;
+  const jobs = [];
+  for (let r = Math.floor(y0 / tilePx); r <= Math.floor((gy + halfPx - 1) / tilePx); r++) {
+    for (let c = Math.floor(x0 / tilePx); c <= Math.floor((gx + halfPx - 1) / tilePx); c++) {
+      jobs.push(
+        loadImg(T.url.replace("{r}", r).replace("{c}", c)).then((img) =>
+          g.drawImage(img, (c * tilePx - x0) * k, (r * tilePx - y0) * k, tilePx * k, tilePx * k)
+        )
+      );
+    }
+  }
+  await Promise.all(jobs);
+
+  const px = g.getImageData(0, 0, N, N).data;
+  const A = new Float32Array(N * N);
+  for (let i = 0; i < A.length; i++) A[i] = px[i * 4];
+
+  const lonSpan = b.lonMax - b.lonMin, latSpan = b.latMax - b.latMin;
+  const orbitBounds = {
+    lonMin: b.lonMin + (x0 / totalW) * lonSpan,
+    lonMax: b.lonMin + ((gx + halfPx) / totalW) * lonSpan,
+    latMax: b.latMax - (y0 / totalH) * latSpan,
+    latMin: b.latMax - ((gy + halfPx) / totalH) * latSpan,
+  };
+  return { mode: "sim", cfg: { resM: res, orbitBounds, rover: { radiusM: 40 } }, N, A, orbitImg: canvas };
+}
+
+// 숨겨진 실제 위치의 위성 사진을 '로버가 본 지형' 처럼 바꿈 (논문 Fig.3 의 차이를 흉내)
+function simulateObservation(D, truth) {
+  const res = D.cfg.resM;
+  const R = Math.round(LOC.outerM / res);
+  const S = 2 * R;
+  const half = S / 2;
+  const obs = new Float32Array(S * S);
+  const valid = new Uint8Array(S * S);
+
+  const rot = Math.random() * 360; // 스테레오 쌍 사이 빈틈 (5쌍, 사이 12°)
+  const pairSpan = 360 / 5;
+  const rocks = Array.from({ length: 7 }, () => ({ a: Math.random() * 360, r: 6 + Math.random() * 15, w: 3 + Math.random() * 5 }));
+  const gamma = 0.7 + Math.random() * 0.25; // 조명 차이
+  const gain = 1.05 + Math.random() * 0.2;
+  const sun = Math.random() * Math.PI * 2;
+  const yaw = (gauss() * 0.7 * Math.PI) / 180; // 방위 추정 오차
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const sample = (fx, fy) => {
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const ax = fx - x0, ay = fy - y0;
+    const i = y0 * D.N + x0;
+    const A = D.A;
+    return (A[i] * (1 - ax) + A[i + 1] * ax) * (1 - ay) + (A[i + D.N] * (1 - ax) + A[i + D.N + 1] * ax) * ay;
+  };
+
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const i = y * S + x;
+      const ox = x - half, oy = y - half; // prepareTemplate 와 같은 기준
+      const r = Math.hypot(ox, oy) * res;
+      if (r < LOC.innerM || r > LOC.outerM) continue;
+      const ang = ((Math.atan2(oy, ox) * 180) / Math.PI - rot + 720) % 360;
+      if (ang % pairSpan > pairSpan - 12) continue; // 스테레오 빈틈
+      if (rocks.some((k) => r > k.r && Math.abs(((ang - k.a + 540) % 360) - 180) < k.w)) continue; // 바위 그림자
+      if (r > 20 && Math.random() < ((r - 20) / 5) * 0.5) continue; // 먼 거리 스테레오 실패
+
+      const base = sample(truth.x + ox * cy - oy * sy, truth.y + ox * sy + oy * cy) / 255;
+      const tilt = 1 + 0.12 * ((ox * Math.cos(sun) + oy * Math.sin(sun)) / R);
+      obs[i] = Math.max(0, Math.min(255, 255 * Math.pow(base, gamma) * gain * tilt + gauss() * 6));
+      valid[i] = 1;
+    }
+  }
+  return { S, obs, valid };
+}
+
+// 화면용: 숨겨진 실제 위치 주변 원본 위성 사진 (노이즈 넣기 전, 반경 40m)
+function simSourceView(D, truth) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 320;
+  const g = c.getContext("2d");
+  const R = 40 / D.cfg.resM;
+  g.filter = "contrast(1.4)";
+  g.drawImage(D.orbitImg, truth.x - R, truth.y - R, 2 * R, 2 * R, 0, 0, 320, 320);
+  return c;
+}
+
+// ---------- 모드별 설명 ----------
+function renderModeInfo(mode) {
+  const real = mode === "real";
+  locModeSub.textContent = real
+    ? "시연: NASA Spirit 로버가 실제로 찍은 주변 사진을 위성 사진과 비교해 위치를 찾아요. (NASA JPL Censible 방식)"
+    : "화성엔 GPS가 없어요. 내 주변 지형을 위성 사진과 비교해서 지금 서 있는 정확한 위치를 찾아요. (NASA JPL Censible 방식)";
+  locStep1.textContent = real ? "로버가 찍은 주변 사진" : "내 주변 360° 촬영 (가상)";
+  locOverviewCap.textContent = real ? "300m 주변 궤도 지도" : "200m 주변 위성 사진";
+  locSrcCap.innerHTML = real
+    ? `실제 로버 사진 <small>(위에서 본 모습, 반경 40m · 점선 = 매칭에 쓴 4~25m)</small>`
+    : `원본 위성 사진 <small>(숨겨진 실제 위치 주변, 반경 40m · 점선 = 매칭에 쓴 4~25m)</small>`;
+  locSourceInfo.innerHTML = real
+    ? `<h3>관측에 사용한 실제 로버 사진</h3>
+      <dl>
+        <div><dt>로버</dt><dd>NASA Spirit (MER-A) · Navcam 왼쪽 카메라</dd></div>
+        <div><dt>촬영</dt><dd>sol 36 (2004-02-09) · Gusev 크레이터 착륙지 부근</dd></div>
+        <div><dt>제품</dt><dd class="is-mono">2NN036EFF04VRT00P1617L000M2 (NASA PDS, 수직 투영 모자이크)</dd></div>
+        <div><dt>해상도</dt><dd>원본 2 cm/px → 0.5 m/px 로 맞춰 사용</dd></div>
+        <div><dt>실제 위치</dt><dd id="loc-src-coord">측정이 끝나면 공개 (정답)</dd></div>
+      </dl>
+      <p class="loc-source__note">Spirit 로버가 <b>실제로 360° 촬영한 사진</b>을 위에서 본 지형으로 바꾼 자료예요.
+        이 사진을 <b>궤도 사진(data/ 가시광 모자이크)</b>과 Census 방식으로 맞춰 위치를 찾아요.
+        정답은 궤도 사진에 찍힌 Spirit 착륙선으로 확인한 값이에요.</p>`
+    : `<h3>관측: 위성 사진으로 만든 가상 관측</h3>
+      <dl>
+        <div><dt>궤도 지도</dt><dd>현위치 주변 ±100m 고해상도 위성 사진 (HiRISE 등, 0.25 m/px)</dd></div>
+        <div><dt>가상 관측</dt><dd>숨겨진 실제 위치의 위성 사진에 조명 차이·노이즈·스테레오 빈틈·바위 그림자·방위 오차를 넣음</dd></div>
+        <div><dt>추정 위치</dt><dd>지금 앱이 알고 있는 현위치 (실제와 15~35m 어긋났다고 가정)</dd></div>
+        <div><dt>실제 위치</dt><dd id="loc-src-coord">측정이 끝나면 공개 (정답)</dd></div>
+      </dl>
+      <p class="loc-source__note">우주인 카메라가 아직 없어서 <b>위성 사진으로 관측을 흉내</b> 냈어요.
+        현위치가 바뀌어도 그 주변에서 동작해요. 실제 로버 사진으로 보려면 아래 <b>🛰 실제 로버 사진으로 해보기</b>를 누르세요.</p>`;
 }
 
 // ---------- 격자 ↔ 경위도 ----------
@@ -258,7 +416,7 @@ function drawRoverPhoto(D, progress) {
   g.arc(size / 2, size / 2, size / 2, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
   g.closePath();
   g.clip();
-  g.drawImage(D.viewImg, 0, 0, size, size);
+  g.drawImage(D.viewSrc, 0, 0, size, size);
   g.restore();
 
   g.strokeStyle = "rgba(76, 201, 240, 0.9)";
@@ -368,37 +526,66 @@ function drawMapPanel(g, bg, vSize, k, prior, { scanRow, best, done }) {
 }
 
 // ---------- 전체 실행 ----------
-async function runLocalization() {
-  if (loc.running) return;
-  const cfg = REGIONS[currentRegion]?.localize;
-  if (!cfg) {
-    locResultEl.innerHTML = `<p class="loc-result__warn">이 지역은 아직 위치 추정용 로버 사진/궤도 지도가 없어요.</p>`;
-    return;
-  }
-  loc.running = true;
-  locRetryBtn.disabled = true;
-  locShowBtn.disabled = true;
-  locResultEl.innerHTML = `<p class="loc-result__wait">로버 사진과 궤도 지도를 맞춰 보는 중…</p>`;
-  Object.values(locCanvases).forEach((cv) => cv.getContext("2d").clearRect(0, 0, cv.width, cv.height));
+function setLocBusy(busy) {
+  loc.running = busy;
+  locRetryBtn.disabled = busy;
+  locRealBtn.disabled = busy;
+  if (busy) locShowBtn.disabled = true;
+}
 
+async function runLocalization(mode = loc.mode) {
+  if (loc.running) return;
+  loc.mode = mode;
+  renderModeInfo(mode);
+  setLocBusy(true);
+  locResultEl.innerHTML = `<p class="loc-result__wait">${mode === "real" ? "로버가 찍은 사진과 위성 사진을" : "내 주변 지형과 위성 사진을"} 비교해서 위치를 찾는 중…</p>`;
+  Object.values(locCanvases).forEach((cv) => cv.getContext("2d").clearRect(0, 0, cv.width, cv.height));
+  locSrcCanvas.getContext("2d").clearRect(0, 0, locSrcCanvas.width, locSrcCanvas.height);
+
+  // 데이터 준비: 정답(실제 위치) 은 알고리즘에 주지 않음. '추정 위치' 는 정답에서 15~35m 떨어진 곳
+  let D, truth, prior;
+  const offset = () => {
+    const ang = Math.random() * Math.PI * 2;
+    const dist = (LOC.priorMinM + Math.random() * (LOC.priorMaxM - LOC.priorMinM)) / LOC.simResM;
+    return { dx: Math.cos(ang) * dist, dy: Math.sin(ang) * dist };
+  };
   try {
-    if (!loc.data || loc.data.cfg !== cfg) loc.data = await loadLocalizeData(cfg);
+    if (mode === "real") {
+      const cfg = REGIONS.gusev.localize;
+      if (!loc.realData) loc.realData = await loadLocalizeData(cfg);
+      D = loc.realData;
+      truth = lonLatToGrid(cfg, D.N, cfg.truth);
+      const o = offset();
+      prior = { x: Math.round(truth.x + o.dx), y: Math.round(truth.y + o.dy) };
+      D.viewSrc = D.viewImg;
+      loc.patch = { src: cfg.orbit, bounds: cfg.orbitBounds };
+    } else {
+      const here = getCurrentPosition();
+      if (!here) throw new Error("NO_POSITION");
+      D = await buildSimData(here);
+      prior = { x: D.N / 2, y: D.N / 2 }; // 추정 위치 = 지금 앱이 아는 현위치
+      const o = offset();
+      truth = { x: prior.x + o.dx, y: prior.y + o.dy }; // 숨겨진 실제 위치
+      Object.assign(D, simulateObservation(D, truth));
+      D.viewSrc = simSourceView(D, truth);
+      loc.patch = { src: D.orbitImg.toDataURL("image/jpeg", 0.85), bounds: D.cfg.orbitBounds };
+    }
   } catch (e) {
     console.error(e);
-    locResultEl.innerHTML = `<p class="loc-result__warn">데이터를 읽지 못했어요. Live Server 등 http 로 열어 주세요.</p>`;
-    loc.running = false;
-    locRetryBtn.disabled = false;
+    const msg = {
+      NO_POSITION: "이 지역은 현위치 정보가 없어요.",
+      NO_TILES: "고해상도 위성 사진 타일이 없어요.",
+      OUT_OF_TILES: "현위치 주변의 고해상도 위성 사진이 없어요 (Gusev 현위치 주변 3km 안에서만 가능).",
+    }[e.message] || "데이터를 읽지 못했어요. Live Server 등 http 로 열어 주세요.";
+    locResultEl.innerHTML = `<p class="loc-result__warn">${msg} 아래 <b>🛰 실제 로버 사진으로 해보기</b>는 언제나 시연할 수 있어요.</p>`;
+    setLocBusy(false);
     return;
   }
-  const D = loc.data;
+  loc.data = D;
+  const cfg = D.cfg;
   const N = D.N;
   const res = cfg.resM;
-
-  // 정답(실제 로버 위치) 은 알고리즘에 주지 않음. '추정 위치' 는 정답에서 15~35m 떨어진 곳 (매번 무작위)
-  const truth = lonLatToGrid(cfg, N, cfg.truth);
-  const ang = Math.random() * Math.PI * 2;
-  const dist = (LOC.priorMinM + Math.random() * (LOC.priorMaxM - LOC.priorMinM)) / res;
-  const prior = { x: Math.round(truth.x + Math.cos(ang) * dist), y: Math.round(truth.y + Math.sin(ang) * dist) };
+  const locSrcCoord = document.getElementById("loc-src-coord");
 
   // ① 실제 로버 사진
   setStep(1);
@@ -532,7 +719,8 @@ async function runLocalization() {
   const candidates = cSize * cSize + fSize * fSize;
 
   // 정답 공개
-  locSrcCoord.textContent = `${formatLonLat(cfg.truth)} (sol 36 실제 로버 위치)`;
+  const truthLL = gridToLonLat(cfg, N, truth.x, truth.y);
+  locSrcCoord.textContent = mode === "real" ? `${formatLonLat(cfg.truth)} (sol 36 실제 로버 위치)` : `${formatLonLat(truthLL)} (숨겨 둔 실제 위치)`;
   drawOverview(D, prior, truth, foundGrid);
 
   loc.result = { found, errM };
@@ -543,20 +731,19 @@ async function runLocalization() {
   const dirText = `${moveE >= 0 ? "동" : "서"}쪽 ${Math.abs(moveE).toFixed(1)}m, ${moveN >= 0 ? "북" : "남"}쪽 ${Math.abs(moveN).toFixed(1)}m`;
   locResultEl.innerHTML = `
     <div class="loc-result__main">
-      <span class="loc-result__label">추정 현재 위치</span>
+      <span class="loc-result__label">찾은 내 위치</span>
       <strong>${formatLonLat(found)}</strong>
     </div>
     <dl class="loc-result__stats">
-      <div><dt>위치 보정</dt><dd>${dirText}</dd></div>
-      <div><dt>신뢰도</dt><dd class="is-${confCls}">${confLabel} (${confPct}%)</dd></div>
-      <div><dt>매칭 점수</dt><dd>${best.s.toFixed(3)} · 비교 ${T.n.toLocaleString()}px</dd></div>
-      <div><dt>계산 시간</dt><dd>${Math.round(computeMs)} ms · 후보 ${candidates.toLocaleString()}곳</dd></div>
+      <div><dt>앱이 알던 위치에서</dt><dd>${dirText} 이동</dd></div>
+      <div><dt>믿을 만한 정도</dt><dd class="is-${confCls}">${confLabel} (${confPct}%)</dd></div>
+      <div><dt>다른 정도 (낮을수록 닮음)</dt><dd>${best.s.toFixed(3)} · 비교 ${T.n.toLocaleString()}px</dd></div>
+      <div><dt>계산 시간</dt><dd>${Math.round(computeMs)} ms · 후보 ${candidates.toLocaleString()}곳 비교</dd></div>
     </dl>
-    <p class="loc-result__sim">실제 로버 위치(궤도 사진의 Spirit 착륙선으로 확인)와의 오차 <b>${errM.toFixed(2)} m</b></p>`;
+    <p class="loc-result__sim">${mode === "real" ? "실제 로버 위치(궤도 사진의 Spirit 착륙선으로 확인)" : "숨겨 둔 실제 위치"}와의 오차 <b>${errM.toFixed(2)} m</b></p>`;
 
   applyLocalization(found);
-  loc.running = false;
-  locRetryBtn.disabled = false;
+  setLocBusy(false);
   locShowBtn.disabled = false;
 }
 
@@ -566,7 +753,7 @@ function applyLocalization(found) {
   region.currentPosition = { lon: found.lon, lat: found.lat };
   if (typeof renderNavMap === "function") renderNavMap();
   document.dispatchEvent(new CustomEvent("positionchange"));
-  locPatchEl.src = region.localize.orbit;
+  locPatchEl.src = loc.patch.src;
   locPatchEl.dataset.ready = "1";
   positionLocPatch();
 }
@@ -574,11 +761,10 @@ function applyLocalization(found) {
 // 2D 지도 위에 위치 추정에 쓴 고해상도 궤도 사진을 겹쳐 보여줌 (확대하면 선명)
 function positionLocPatch() {
   if (!locPatchEl) return;
-  const cfg = REGIONS[currentRegion]?.localize;
-  const show = locPatchEl.dataset.ready === "1" && !!cfg;
+  const show = locPatchEl.dataset.ready === "1" && !!loc.patch && !!REGIONS[currentRegion];
   locPatchEl.style.display = show ? "block" : "none";
   if (!show) return;
-  const b = cfg.orbitBounds;
+  const b = loc.patch.bounds;
   const tl = lonLatToImage(b.lonMin, b.latMax);
   const br = lonLatToImage(b.lonMax, b.latMin);
   locPatchEl.style.transform = `translate(${view.x + tl.x * view.scale}px, ${view.y + tl.y * view.scale}px)`;
@@ -590,11 +776,12 @@ function positionLocPatch() {
 locBtn.addEventListener("click", () => {
   if (locDialog.open) return;
   setDrawerOpen(false);
-  locShowBtn.textContent = typeof hud !== "undefined" && hud.on ? "HUD 로 돌아가기" : "지도에서 보기";
+  locShowBtn.textContent = typeof hud !== "undefined" && hud.on ? "찾은 위치로 HUD 돌아가기" : "찾은 위치 지도에서 보기";
   locDialog.showModal();
-  runLocalization();
+  runLocalization("sim");
 });
-locRetryBtn.addEventListener("click", runLocalization);
+locRetryBtn.addEventListener("click", () => runLocalization());
+locRealBtn.addEventListener("click", () => runLocalization("real"));
 locCloseBtn.addEventListener("click", () => locDialog.close());
 locDialog.addEventListener("cancel", (e) => {
   if (loc.running) e.preventDefault(); // 계산 중에는 닫지 않음

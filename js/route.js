@@ -136,13 +136,20 @@ function getCurrentPosition() {
 // 지도에서 위치 고르기 (기존 포인트 핀을 누르면 그 포인트로 지정됨)
 function pickStopOnMap(stop, label) {
   setDrawerOpen(false);
+  // HUD 모드에서는 2D 지도가 가려져 있으므로 잠깐 2D 로 바꿔서 핀을 찍고, 끝나면 HUD 로 돌아감
+  const fromHud = typeof hud !== "undefined" && hud.on;
+  if (fromHud) setHudMode(false);
+  const finish = () => {
+    if (fromHud) setHudMode(true);
+    setDrawerOpen(true);
+  };
   startMapPick(
-    `${label} 위치를 지도에서 클릭하세요 (기존 핀을 눌러도 돼요)`,
+    `${label} 위치를 지도에서 클릭하세요 (기존 핀을 눌러도 돼요)${fromHud ? " · 고르면 HUD 로 돌아가요" : ""}`,
     (lonLat, point) => {
       setStop(stop, lonLat, point ? point.name : null);
-      setDrawerOpen(true);
+      finish();
     },
-    () => setDrawerOpen(true)
+    finish
   );
 }
 
@@ -1027,6 +1034,23 @@ function profileSvg(r) {
 function renderResults() {
   routeResultsEl.replaceChildren();
 
+  // 맨 위: 고른 길로 안내 시작
+  const sel = nav.results.find((r) => r.id === nav.selectedId);
+  if (sel) {
+    const bar = document.createElement("div");
+    bar.className = "route-start";
+    const btn = document.createElement("button");
+    btn.className = "route-start__btn";
+    btn.style.setProperty("--route-color", sel.color);
+    btn.textContent = `▶ ${sel.name}로 안내 시작`;
+    btn.addEventListener("click", () => startGuidance(sel));
+    const hint = document.createElement("span");
+    hint.className = "route-start__hint";
+    hint.textContent = "아래에서 다른 길을 눌러 바꿀 수 있어요";
+    bar.append(btn, hint);
+    routeResultsEl.append(bar);
+  }
+
   for (const r of nav.results) {
     const card = document.createElement("button");
     card.className = "route-card";
@@ -1082,14 +1106,7 @@ function renderResults() {
       stats.append(wrap);
     }
 
-    card.append(head, summary);
-    if (r.liveReplans) {
-      const badge = document.createElement("div");
-      badge.className = "route-card__walked";
-      badge.textContent = `↻ 걸으며 잰 지형으로 D* Lite 재계획 ${r.liveReplans}회 · 지금 위치부터 남은 길 기준`;
-      card.append(badge);
-    }
-    card.append(profileSvg(r), axis);
+    card.append(head, summary, profileSvg(r), axis);
     // 나의 정보 한도 · 일몰 · 통신 경고
     if (r.warnings.length) {
       const warn = document.createElement("ul");
@@ -1110,6 +1127,40 @@ function renderResults() {
     });
     routeResultsEl.append(card);
   }
+}
+
+// ---------- 안내 시작: 출발점에서 고른 길을 바라보고 HUD(AR) 안내로 ----------
+function startGuidance(route) {
+  const region = REGIONS[currentRegion];
+  if (!region || !route.path.length) return;
+  nav.selectedId = route.id;
+
+  // 내 위치 = 경로 출발점
+  const start = route.path[0];
+  region.currentPosition = { lon: start.lon, lat: start.lat };
+
+  // 걸으며 재계획하는 상태도 처음부터
+  Object.assign(hudWalk, { last: null, planner: null, key: null, nextStop: 1 });
+
+  // 첫 진행 방향: 출발점에서 15m 앞 경로 지점을 바라봄
+  let ahead = route.path[route.path.length - 1];
+  for (const p of route.path) {
+    if (distanceM(start, p) >= 15) {
+      ahead = p;
+      break;
+    }
+  }
+  const cos = Math.cos((start.lat * Math.PI) / 180);
+  const bearing = (Math.atan2((ahead.lon - start.lon) * cos, ahead.lat - start.lat) * 180) / Math.PI;
+
+  renderResults();
+  renderNavMap();
+  setDrawerOpen(false);
+  if (typeof setHudMode === "function") {
+    if (!hud.on) setHudMode(true);
+    hud.heading = (bearing + 360) % 360;
+  }
+  document.dispatchEvent(new CustomEvent("positionchange")); // HUD 내 위치 · 발밑 타일 갱신
 }
 
 // ---------- 지도에 경로 / 출발·도착 표시 ----------
@@ -1164,10 +1215,16 @@ function renderNavMap() {
     navRoutesSvg.append(line);
   }
 
-  // 현위치 표시
+  // 현위치 표시 + 바라보는 방향 (HUD 에서 마지막으로 바라본 방향, 0° = 북쪽)
   const here = getCurrentPosition();
   if (here) {
     const { x, y } = lonLatToImage(here.lon, here.lat);
+    const cone = document.createElement("div");
+    cone.className = "here-cone";
+    cone.dataset.x = x;
+    cone.dataset.y = y;
+    cone.style.setProperty("--heading", `${typeof hud !== "undefined" ? hud.heading : 0}deg`);
+    navPinsEl.append(cone); // 점보다 먼저 넣어서 점 아래에 깔림
     const dot = document.createElement("div");
     dot.className = "here-dot";
     dot.dataset.x = x;

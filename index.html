@@ -31,12 +31,6 @@
       <div id="globe-cesium" class="globe-cesium"></div>
       <div id="globe-loading" class="globe-loading" hidden>화성 3D 지형 불러오는 중…</div>
       <span class="globe-hint">드래그 회전 · 휠 확대/축소 · Ctrl+드래그 기울이기</span>
-      <!-- 고도 표시 (실제 DEM: MOLA 400 km + HiRISE 30 km): 색 지도 + 범례 + 마우스 위치 고도 (js/globe.js) -->
-      <div class="globe-elev">
-        <label class="globe-elev__toggle">고도 표시 <input type="checkbox" id="globe-elev-toggle" checked /></label>
-        <div id="globe-elev-legend" class="globe-elev__legend"></div>
-      </div>
-      <div id="globe-elev-readout" class="globe-elev__readout" hidden></div>
     </section>
     <div id="globe-msg" class="globe-msg" role="status" hidden></div>
 
@@ -48,7 +42,6 @@
       <canvas id="hud-3d" class="hud-3d" hidden></canvas>
       <div id="hud-loading" class="hud-loading" hidden>실제 지형(DEM · 궤도 사진) 불러오는 중…</div>
       <!-- 오른쪽 위: 실제 DEM 에서 읽은 고도 · 경사 (js/hud.js) -->
-      <span id="hud-terrain" class="hud-source" role="status">지형 데이터 불러오는 중…</span>
       <!-- 지형 스캔 (안전/주의/위험 색 표시) -->
       <canvas id="hud-scan" class="hud-scan"></canvas>
       <!-- 포인트 AR 표시 -->
@@ -65,6 +58,8 @@
         <div id="hud-compass-tape" class="hud-compass__tape"></div>
         <div class="hud-compass__center"><span id="hud-heading">0°</span></div>
         <div id="hud-ahead" class="hud-ahead" role="status"></div>
+        <!-- 전방 상태 바로 아래: 발밑 지형 정보 (고도 · 경사 · 모래 위험 · 출처) -->
+        <div id="hud-terrain" class="hud-terrain" role="status"><span class="hud-terrain__msg">지형 데이터 불러오는 중…</span></div>
       </div>
 
       <!-- 왼쪽 위: 경로 안내 카드 -->
@@ -83,7 +78,7 @@
       <span class="hud-hint"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 · <kbd>Shift</kbd> 달리기 · 드래그 / <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 둘러보기</span>
 
       <!-- 왼쪽 아래(미니맵 위): 현재 위치 보정 — 주변 지형을 궤도 지도와 맞춰 위치를 다시 잡음 -->
-      <button id="hud-locate-btn" class="hud-locate-btn" title="주변 지형으로 현재 위치 보정">
+      <button id="hud-locate-btn" class="hud-locate-btn" title="GPS 없이 주변 지형 사진으로 내 위치 찾기">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" fill="currentColor" />
           <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
@@ -105,6 +100,9 @@
     <div id="nav-pins" class="map-pins nav-pins"></div>
 
     <!-- 오른쪽 아래: 축척 표시 -->
+    <!-- 오른쪽 아래 구석: 마우스를 올린 곳의 위도·경도 -->
+    <div id="cursor-coord" class="cursor-coord" aria-live="off" hidden></div>
+
     <div class="scale-bar" aria-label="축척">
       <span id="scale-label" class="scale-bar__label">-</span>
       <div id="scale-line" class="scale-bar__line"></div>
@@ -213,6 +211,7 @@
               <input type="checkbox" class="layer-group__toggle" aria-label="위험 요소 전체 켜기/끄기" />
             </div>
             <ul class="layer-list">
+            <li><label>위험도 (HUD 와 같은 기준) <span class="layer-tag">히트맵</span> <input type="checkbox" class="is-red" data-layer="hazard_level" /></label></li>
             <li><label>모래 빠질 위험 있는 곳 <input type="checkbox" class="is-red" data-layer="ti_sand_trap" /></label></li>
             <li><label>방사선 위험 (추정) <span class="layer-tag">히트맵</span> <input type="checkbox" class="is-red" data-layer="radiation" /></label></li>
             <li><label>귀환 한계 (산소 · 시간) <span class="layer-tag">히트맵</span> <input type="checkbox" class="is-red" data-layer="return_limit" /></label></li>
@@ -267,23 +266,6 @@
       </div>
     </div>
 
-    <!-- 가운데 위: 탐색 지역 선택 -->
-    <div class="region-select">
-      <button id="region-btn" class="region-select__btn" aria-haspopup="listbox" aria-expanded="false" aria-controls="region-list">
-        <span class="region-select__label">탐색 지역</span>
-        <span id="region-name" class="region-select__name">Gusev · Columbia Hills</span>
-        <span class="region-select__caret" aria-hidden="true">▾</span>
-      </button>
-      <ul id="region-list" class="region-select__list" role="listbox" hidden>
-        <li role="option" data-region="gusev" aria-selected="true">Gusev · Columbia Hills</li>
-        <li role="option" data-region="jezero">Jezero Crater</li>
-        <li role="option" data-region="gale">Gale Crater</li>
-        <li role="option" data-region="valles-marineris">Valles Marineris</li>
-        <li role="option" data-region="olympus-mons">Olympus Mons</li>
-        <li role="option" data-region="utopia-planitia">Utopia Planitia</li>
-      </ul>
-    </div>
-
     <!-- 왼쪽 아래: HUD 창 (PiP처럼 크기 조절 / 닫기 가능) -->
     <section id="hud-window" class="hud-card" aria-label="HUD 창">
       <div class="hud-card__header">
@@ -299,7 +281,7 @@
     <div class="map-controls">
       <button id="hud-toggle-btn" class="circle-btn is-active" aria-label="HUD 창 켜기/끄기" aria-pressed="true">HUD</button>
       <button id="view-btn" class="circle-btn" aria-label="3D 지도로 전환">2D</button>
-      <button id="locate-btn" class="circle-btn" aria-label="주변 지형으로 현재 위치 찾기" title="현재 위치 찾기">
+      <button id="locate-btn" class="circle-btn" aria-label="GPS 없이 주변 지형 사진으로 내 위치 찾기" title="GPS 없이 주변 지형 사진으로 내 위치 찾기">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <circle cx="12" cy="12" r="7" />
           <line x1="12" y1="2" x2="12" y2="6" />
@@ -362,71 +344,58 @@
     <dialog id="loc-dialog" class="loc-dialog">
       <header class="loc-dialog__head">
         <div>
-          <h2 class="loc-dialog__title">현재 위치 찾기</h2>
-          <p class="loc-dialog__sub">주변 지형을 궤도 지도와 맞춰 보는 방식 · NASA JPL Censible (ICRA 2024) 참고</p>
+          <h2 class="loc-dialog__title">주변 지형으로 내 위치 찾기</h2>
+          <p id="loc-mode-sub" class="loc-dialog__sub">화성엔 GPS가 없어요. 내 주변을 찍은 지형을 위성 사진과 비교해서, 지금 서 있는 정확한 위치를 찾아요.</p>
         </div>
         <button id="loc-close" class="photo-viewer__close" aria-label="닫기">×</button>
       </header>
 
-      <!-- 관측에 사용한 실제 로버 사진 -->
+      <!-- 관측에 사용한 사진 (모드에 따라 js/localize.js 가 내용을 채움) -->
       <section class="loc-source">
         <figure class="loc-source__photo">
           <canvas id="loc-src"></canvas>
-          <figcaption>실제 로버 사진 <small>(위에서 본 모습, 반경 40m · 점선 = 매칭에 쓴 4~25m)</small></figcaption>
+          <figcaption id="loc-src-cap"></figcaption>
         </figure>
-        <div class="loc-source__info">
-          <h3>관측에 사용한 실제 로버 사진</h3>
-          <dl>
-            <div><dt>로버</dt><dd>NASA Spirit (MER-A) · Navcam 왼쪽 카메라</dd></div>
-            <div><dt>촬영</dt><dd>sol 36 (2004-02-09) · Gusev 크레이터 착륙지 부근</dd></div>
-            <div><dt>제품</dt><dd class="is-mono">2NN036EFF04VRT00P1617L000M2 (NASA PDS, 수직 투영 모자이크)</dd></div>
-            <div><dt>해상도</dt><dd>원본 2 cm/px → 0.5 m/px 로 맞춰 사용</dd></div>
-            <div><dt>실제 위치</dt><dd id="loc-src-coord">측정이 끝나면 공개 (정답)</dd></div>
-          </dl>
-          <p class="loc-source__note">
-            Spirit 로버가 <b>실제로 360° 촬영한 사진</b>을 위에서 본 지형으로 바꾼 자료예요. 이 사진을
-            <b>궤도 사진(data/ 가시광 모자이크)</b>과 Census 방식으로 맞춰 위치를 찾아요.
-            실제 위치는 알고리즘에 알려 주지 않아요. 정답은 궤도 사진에 찍힌 Spirit 착륙선으로 확인한 값이에요.
-          </p>
-        </div>
+        <div id="loc-source-info" class="loc-source__info"></div>
         <figure class="loc-source__overview">
           <canvas id="loc-overview"></canvas>
-          <figcaption>300m 주변 궤도 지도 <small>(<b class="is-red">×</b> 추정 · <b class="is-white">○</b> 정답 · <b class="is-green">+</b> 결과)</small></figcaption>
+          <figcaption><span id="loc-overview-cap">주변 궤도 지도</span> <small>(<b class="is-red">×</b> 앱이 알던 위치 · <b class="is-white">○</b> 실제 위치 · <b class="is-green">+</b> 찾은 위치)</small></figcaption>
         </figure>
       </section>
 
       <ol class="loc-steps">
-        <li class="loc-step"><span>1</span>로버 360° 실제 사진</li>
-        <li class="loc-step"><span>2</span>정사투영 (0.5m 격자)</li>
-        <li class="loc-step"><span>3</span>Census 변환</li>
-        <li class="loc-step"><span>4</span>궤도 지도와 매칭 (반경 40m)</li>
-        <li class="loc-step"><span>5</span>서브픽셀 보정 · 신뢰도</li>
+        <li class="loc-step"><span>1</span><em id="loc-step1">주변 360° 촬영</em></li>
+        <li class="loc-step"><span>2</span>위에서 본 모습으로 바꾸기</li>
+        <li class="loc-step"><span>3</span>밝기에 강한 무늬 뽑기</li>
+        <li class="loc-step"><span>4</span>위성 사진에서 같은 무늬 찾기 (반경 40m)</li>
+        <li class="loc-step"><span>5</span>정밀 보정 · 믿을 만한지 확인</li>
       </ol>
 
       <div class="loc-panels">
         <figure class="loc-panel">
           <canvas id="loc-obs"></canvas>
-          <figcaption>로버 관측 <small>(정사투영 0.5m 격자, 4~25m)</small></figcaption>
+          <figcaption>내 주변 지형 <small>(위에서 본 모습 · 반경 4~25m)</small></figcaption>
         </figure>
         <figure class="loc-panel">
           <canvas id="loc-census"></canvas>
-          <figcaption>Census 변환 <small>(밝기 변화에 강한 패턴)</small></figcaption>
+          <figcaption>무늬로 바꾼 모습 <small>(Census 변환 · 조명이 달라도 같은 무늬)</small></figcaption>
         </figure>
         <figure class="loc-panel">
           <canvas id="loc-map"></canvas>
-          <figcaption>궤도 지도 <small>(<b class="is-red">×</b> 추정 위치 · <b class="is-green">+</b> 찾은 위치)</small></figcaption>
+          <figcaption>위성 사진에서 찾기 <small>(<b class="is-red">×</b> 앱이 알던 위치 · <b class="is-green">+</b> 찾은 위치)</small></figcaption>
         </figure>
         <figure class="loc-panel">
           <canvas id="loc-score"></canvas>
-          <figcaption>매칭 점수 지도 <small>(밝을수록 잘 맞음)</small></figcaption>
+          <figcaption>얼마나 닮았나 <small>(밝을수록 내 주변과 비슷한 곳)</small></figcaption>
         </figure>
       </div>
 
       <div id="loc-result" class="loc-result" role="status"></div>
 
       <div class="loc-dialog__actions">
+        <button id="loc-real" class="route-btn loc-real-btn" title="시연용: 실제 Spirit 로버 사진이 있는 곳에서 측정">🛰 실제 로버 사진으로 해보기</button>
         <button id="loc-retry" class="route-btn">다시 측정</button>
-        <button id="loc-show" class="route-btn is-primary" disabled>지도에서 보기</button>
+        <button id="loc-show" class="route-btn is-primary" disabled>찾은 위치 지도에서 보기</button>
       </div>
     </dialog>
 
