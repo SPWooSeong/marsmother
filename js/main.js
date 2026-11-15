@@ -9,6 +9,7 @@ const MAP_WIDTH_M = REGIONS.gusev.widthM;
 
 const mapEl = document.getElementById("map");
 const mapLayer = document.getElementById("map-layer");
+const routeLayer = document.getElementById("route-layer"); // 경로선 층 (과학 레이어 위)
 const mapImage = document.getElementById("map-image");
 const scaleLabel = document.getElementById("scale-label");
 const scaleLine = document.getElementById("scale-line");
@@ -16,8 +17,10 @@ const scaleLine = document.getElementById("scale-line");
 const view = { x: 0, y: 0, scale: 1, fitScale: 1, minScale: 0.1, maxScale: 10 };
 
 function applyView() {
-  mapLayer.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
-  mapLayer.style.setProperty("--inv-scale", 1 / view.scale); // 경로선 굵기를 화면 기준으로 유지
+  const transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  mapLayer.style.transform = transform;
+  routeLayer.style.transform = transform; // 경로선 층도 지도 사진과 똑같이 움직임
+  routeLayer.style.setProperty("--inv-scale", 1 / view.scale); // 경로선 굵기를 화면 기준으로 유지
   updateScaleBar();
   positionPins();
   scheduleTiles();
@@ -701,7 +704,11 @@ function getBases() {
 // onPick(lonLat): 클릭한 위치, onCancel(): Esc로 취소했을 때
 let mapPick = null;
 
+let mapPickFromHud = false; // HUD 에서 시작한 위치 고르기: 2D 지도로 잠깐 바꿨다가 끝나면 HUD 로
+
 function startMapPick(message, onPick, onCancel) {
+  mapPickFromHud = typeof hud !== "undefined" && hud.on;
+  if (mapPickFromHud) setHudMode(false);
   mapPick = { onPick, onCancel };
   addHint.firstChild.textContent = `${message} · `;
   addHint.hidden = false;
@@ -712,6 +719,10 @@ function endMapPick() {
   mapPick = null;
   addHint.hidden = true;
   mapEl.classList.remove("is-adding");
+  if (mapPickFromHud) {
+    mapPickFromHud = false;
+    setHudMode(true);
+  }
 }
 
 // 포인트 추가: 버튼 → 지도 클릭 → 이름/종류 입력
@@ -1044,6 +1055,8 @@ function setDrawerOpen(open) {
   drawerBackdrop.hidden = !open;
   menuBtn.setAttribute("aria-expanded", String(open));
   document.body.classList.toggle("is-drawer-open", open); // 왼쪽 아래 HUD 창 등을 메뉴 옆으로 비켜 줌 (css)
+  // HUD 모드에서 메뉴를 열면 2D 지도를 보여 주고, 닫으면 HUD 로 돌아감 (js/hud.js)
+  if (typeof onDrawerToggle === "function") onDrawerToggle(open);
 }
 
 menuBtn.addEventListener("click", () => setDrawerOpen(true));

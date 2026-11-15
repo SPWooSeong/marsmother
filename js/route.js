@@ -1201,11 +1201,13 @@ function renderNavMap() {
       .join(" ");
     const selected = r.id === nav.selectedId;
 
-    if (selected) {
-      const outline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-      outline.setAttribute("points", points);
-      outline.classList.add("nav-route", "nav-route--outline");
-      navRoutesSvg.append(outline);
+    // 테두리: 어떤 레이어 색 위에서도 보이게 — 모든 경로에 어두운 테두리, 선택한 경로는 그 안에 흰 테두리까지
+    for (const cls of selected ? ["nav-route--outline", "nav-route--halo"] : ["nav-route--outline"]) {
+      const casing = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+      casing.setAttribute("points", points);
+      casing.classList.add("nav-route", cls);
+      casing.classList.toggle("is-selected", selected);
+      navRoutesSvg.append(casing);
     }
     const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
     line.setAttribute("points", points);

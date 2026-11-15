@@ -155,7 +155,9 @@ const ENV_NEIGHBORS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1
 function envWalkField(sources, { reverse = false, by = "time", limit = Infinity, maxSlopeDeg = PROFILE.slopeLimitDeg } = {}) {
   const { w, h, z, slope, eta, dx, dy } = survey;
   const N = w * h;
-  const cost = new Float32Array(N).fill(Infinity);
+  // cost 는 비교에 쓰이므로 반드시 64비트. 32비트로 저장하면 반올림 때문에 "방금 넣은 값보다 작다" 가
+  // 계속 참이 되어 같은 칸을 끝없이 다시 넣음 (걷기 속도를 올려 범위가 넓어지면 계산이 끝나지 않던 버그)
+  const cost = new Float64Array(N).fill(Infinity);
   const time = new Float32Array(N).fill(Infinity);
   const energy = new Float32Array(N).fill(Infinity);
   const heap = new KeyHeap();
@@ -342,7 +344,8 @@ function envForRoute(startDate, safeCells, spanS) {
   const shadow = envShadowMap(new Date(startDate.getTime() + 3600e3));
   const comm = envCommMap();
   // 안전한 곳(출발지 · 기지)까지 돌아오는 시간. 경로가 닿을 만한 범위까지만 계산하고 그 밖은 상한값
-  const capS = Math.max(1800, spanS * 1.5);
+  //  최소 범위는 '평지로 1.8 km 걸을 시간' — 시간(30분)으로 고정하면 걷기 속도를 올렸을 때 지도 전체를 계산하게 됨
+  const capS = Math.max(1800 / Math.max(EVA.flatSpeedMps, 0.1), spanS * 1.5);
   const ret = envWalkField(safeCells, { reverse: true, by: "time", limit: capS }).time;
   for (let i = 0; i < ret.length; i++) if (ret[i] === Infinity) ret[i] = capS;
   return { radRate: rad.rate, radMin: rad.min, shadow: shadow.map, night: shadow.night, comm, ret, retCapS: capS };

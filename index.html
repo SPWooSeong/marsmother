@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mars Mother</title>
   <link rel="stylesheet" href="css/style.css" />
+  <!-- 디자인 시스템: 색 · 둥글기 · 버튼/입력 모양을 한 가지 규칙으로 통일 (빼면 예전 모습) -->
+  <link rel="stylesheet" href="css/design.css" />
 </head>
 <body>
   <main class="app">
@@ -14,15 +16,18 @@
       <div id="map-tiles" class="map__tiles" aria-hidden="true"></div>
       <div id="map-layer" class="map__layer">
         <img id="map-image" class="map__image" src="assets/maps/columbia-hills.png" alt="Gusev · Columbia Hills 지도" draggable="false" />
-        <!-- 경로(로버 이동 경로 등): 지도와 함께 확대/축소됨 -->
-        <svg id="map-routes" class="map__routes" aria-hidden="true"></svg>
-        <!-- 길찾기 결과 경로 -->
-        <svg id="nav-routes" class="map__routes" aria-hidden="true"></svg>
       </div>
       <!-- 과학 레이어 (레이어 탭에서 켜고 끔, js/layers.js). 400 km 범위라 화면 크기 캔버스에 매번 다시 그림 -->
       <canvas id="science-layers" class="map__science" aria-hidden="true"></canvas>
       <!-- 위치 추정에 쓴 고해상도 궤도 사진 (현재 위치 찾기 후 표시, 확대하면 선명) -->
       <img id="loc-patch" class="map__patch" alt="" draggable="false" />
+      <!-- 경로 층: 과학 레이어(DEM · 히트맵 등)보다 위에 그려서 색에 덮이지 않게. 지도 사진과 같은 배율로 움직임 (main.js applyView) -->
+      <div id="route-layer" class="map__layer map__layer--routes">
+        <!-- 경로(로버 이동 경로 등) -->
+        <svg id="map-routes" class="map__routes" aria-hidden="true"></svg>
+        <!-- 길찾기 결과 경로 -->
+        <svg id="nav-routes" class="map__routes" aria-hidden="true"></svg>
+      </div>
     </div>
 
     <!-- 3D 지도: 오른쪽 아래 2D/3D 버튼으로 전환 -->
@@ -58,9 +63,9 @@
         <div id="hud-compass-tape" class="hud-compass__tape"></div>
         <div class="hud-compass__center"><span id="hud-heading">0°</span></div>
         <div id="hud-ahead" class="hud-ahead" role="status"></div>
-        <!-- 전방 상태 바로 아래: 발밑 지형 정보 (고도 · 경사 · 모래 위험 · 출처) -->
-        <div id="hud-terrain" class="hud-terrain" role="status"><span class="hud-terrain__msg">지형 데이터 불러오는 중…</span></div>
       </div>
+      <!-- 오른쪽 위 시계 아래: 발밑 지형 정보 카드 (고도 · 경사 · 모래 위험 · 출처) -->
+      <div id="hud-terrain" class="hud-terrain" role="status"><span class="hud-terrain__msg">지형 데이터 불러오는 중…</span></div>
 
       <!-- 왼쪽 위: 경로 안내 카드 -->
       <div id="hud-guide" class="hud-guide" hidden>
@@ -83,7 +88,7 @@
           <circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2" fill="currentColor" />
           <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
         </svg>
-        현재 위치 보정
+        내 위치 찾기
       </button>
 
       <!-- 오른쪽 아래: 생체/장비 상태 -->

@@ -67,7 +67,11 @@ hudScene.style.backgroundImage = `url("${HUD_PANO}")`;
 
 // ---------- 모드 전환 ----------
 function setHudMode(on) {
-  if (on) setHudPeek(false);
+  if (on) {
+    setHudPeek(false);
+    hud.drawerPeek = false;
+    document.body.classList.remove("is-hud-drawer-peek");
+  }
   hud.on = on;
   document.body.classList.toggle("is-hud", on);
   hudView.hidden = !on;
@@ -85,6 +89,10 @@ function setHudMode(on) {
     hud.lastT = 0;
     hud.keys.clear();
     syncWorldPosition();
+    if (!hud.evaStart) {
+      const here = getCurrentPosition();
+      if (here) hud.evaStart = { lon: here.lon, lat: here.lat }; // 귀환 여유의 기준 (기지가 없을 때)
+    }
     initTerrain3D(); // 처음 한 번 실제 지형(DEM) 불러오기 (비동기)
     resizeTerrain3D();
     hud.raf = requestAnimationFrame(hudFrame);
@@ -96,7 +104,20 @@ function setHudMode(on) {
   }
 }
 
-// HUD 에서 왼쪽 창을 누르면 2D 지도를 잠깐 보여 줌 (peek). 그 창을 닫거나(×) 다시 누르면 HUD 로 돌아감
+// HUD 모드에서 왼쪽 메뉴(≡)를 열면 2D 지도를 보여 주고, 메뉴를 닫으면 HUD 로 돌아감
+function onDrawerToggle(open) {
+  if (open) {
+    if (hud.on) {
+      setHudMode(false);
+      hud.drawerPeek = true;
+      document.body.classList.add("is-hud-drawer-peek"); // 메뉴를 연 동안 왼쪽 아래 HUD 창은 숨김 (css)
+    }
+  } else if (hud.drawerPeek) {
+    setHudMode(true); // drawerPeek 는 setHudMode 가 꺼 줌
+  }
+}
+
+// HUD 에서 왼쪽 아래 창을 누르면 2D 지도를 잠깐 보여 줌 (peek). 그 창을 닫거나(×) 다시 누르면 HUD 로 돌아감
 const hudPeekCloseBtn = document.getElementById("hud-close-btn");
 function setHudPeek(on) {
   hud.peek = on;
@@ -131,6 +152,10 @@ document.getElementById("hud-locate-btn").addEventListener("click", () => locBtn
 
 // 위치가 보정되면 HUD 의 내 위치 · 발밑 타일을 그곳으로
 document.addEventListener("positionchange", () => {
+  // 위치를 옮겨 새로 시작하면 (안내 시작 · 위치 보정) 그곳이 새 출발 지점
+  const moved = getCurrentPosition();
+  if (moved) hud.evaStart = { lon: moved.lon, lat: moved.lat };
+  hudReturn.key = null;
   syncWorldPosition();
   if (hud3d.ready) resetHudTiles();
 });
@@ -540,12 +565,16 @@ const evaState = {
   doseUSv: 0,
 };
 
+// 오른쪽 아래 링: 산소(큰 링) · 피로도 · 방사선(누적/한도) · 귀환 여유
+//  냉각수 · 전력은 평소엔 숨김 — 둘 다 산소보다 늦게 떨어지게 돼 있어 따로 볼 필요가 없고,
+//  20% 아래로 내려갔을 때만 경고 링(low)으로 나타남
+const VITAL_LOW_PCT = 20;
 const vitals = [
   { id: "o2", label: "O₂", value: 100, color: "#4cc9f0", big: true, sub: "" },
   { id: "fatigue", label: "피로도", value: 0, color: "#ffd166" },
-  { id: "water", label: "냉각수", value: 100, color: "#7df9c4" },
-  { id: "power", label: "전력", value: 100, color: "#c084fc" },
   { id: "rad", label: "방사선", value: 0, color: "#ff7b54", sub: "계산 중" },
+  { id: "ret", label: "귀환", value: 100, color: "#7df9c4", num: "—", sub: "계산 중" },
+  { id: "low", label: "", value: 0, color: "#ff5f5f", hidden: true },
 ];
 
 // 매 프레임: 지금 소비 전력만큼 산소 · 냉각수 · 전력을 씀 (dt: 실제 흐른 초)
@@ -574,11 +603,17 @@ function updateVitals() {
   byId.fatigue.value = Math.min(100, (evaState.energyKj / EVA.dailyEnergyKj) * 100);
   byId.fatigue.num = Math.round(byId.fatigue.value);
   byId.fatigue.sub = `${Math.round(W)} W`;
-  byId.water.value = (evaState.waterKg / EVA.waterKg) * 100;
-  byId.water.num = Math.round(byId.water.value);
-  byId.power.value = (evaState.batteryWh / EVA.batteryWh) * 100;
-  byId.power.num = Math.round(byId.power.value);
+  // 냉각수 · 전력: 20% 아래로 떨어진 것이 있을 때만 (더 낮은 쪽) 경고 링
+  const waterPct = (evaState.waterKg / EVA.waterKg) * 100;
+  const powerPct = (evaState.batteryWh / EVA.batteryWh) * 100;
+  const low = waterPct <= powerPct ? { label: "냉각수", pct: waterPct } : { label: "전력", pct: powerPct };
+  byId.low.hidden = low.pct >= VITAL_LOW_PCT;
+  byId.low.label = low.label;
+  byId.low.value = low.pct;
+  byId.low.num = Math.round(low.pct);
+  byId.low.sub = "부족";
   updateRadiationVital();
+  updateReturnVital();
 }
 
 function ringSvg(v, r, stroke) {
@@ -595,6 +630,7 @@ function ringSvg(v, r, stroke) {
 
 function buildVitals() {
   hudVitalsEl.innerHTML = vitals
+    .filter((v) => !v.hidden)
     .map(
       (v) => `
       <div class="hud-ring ${v.big ? "is-big" : ""}" data-id="${v.id}" title="${v.label} ${v.value}%">
@@ -609,16 +645,76 @@ function buildVitals() {
     .join("");
 }
 
-// 방사선: 현위치 고도 + 시계의 시각으로 추정한 선량 (모델은 marstime.js).
-// 고리는 가능한 범위(가장 낮은 값~가장 높은 값) 안에서 지금 값이 어디쯤인지
+// 방사선: 이번 EVA 에서 지금까지 받은 누적량 ÷ 나의 정보의 EVA 방사선 한도 → 걸을수록 차오르는 링
+//  (선량률은 고도 · 시각으로만 정해져 걸어도 거의 안 변하므로 아래에 작게만 표시. 모델은 marstime.js)
 function updateRadiationVital() {
   const v = vitals.find((x) => x.id === "rad");
   const r = currentRadiation();
   if (r.dose == null) return;
-  const [lo, hi] = radiationRange();
-  v.value = Math.max(0, Math.min(100, ((r.dose - lo) / (hi - lo)) * 100));
-  v.num = r.dose.toFixed(2);
-  v.sub = `누적 ${evaState.doseUSv.toFixed(1)} μSv`;
+  const limit = typeof PROFILE !== "undefined" ? PROFILE.radLimitUSv : 300;
+  const pct = (evaState.doseUSv / limit) * 100;
+  v.value = Math.max(0, Math.min(100, pct));
+  v.num = evaState.doseUSv < 100 ? evaState.doseUSv.toFixed(1) : Math.round(evaState.doseUSv);
+  v.sub = `/${limit} μSv`;
+  v.color = pct >= 100 ? "#ff5f5f" : "#ff7b54";
+}
+
+// ---------- 귀환 여유 ----------
+// "지금 돌아가면 산소가 충분한가": 현위치 → 안전한 곳까지 실제 지형으로 걸어 돌아가는 데 드는 산소 · 시간
+//  안전한 곳 = 가장 가까운 기지, 기지가 없으면 HUD 로 걷기 시작한 지점
+//  링 = 쓸 수 있는 산소(안전 여유 제외) 중 귀환에 쓰고 남는 비율, 숫자 = 걸어서 돌아가는 시간(분)
+const hudReturn = { key: null, field: null };
+const RETURN_FIELD_M = 4000; // 이 거리(평지 기준)까지만 계산 — 그보다 멀면 '범위 밖'
+
+function hudHome() {
+  const here = getCurrentPosition();
+  const bases = typeof getBases === "function" ? getBases() : [];
+  if (here && bases.length) {
+    let best = bases[0], bestD = Infinity;
+    for (const b of bases) {
+      const d = bearingTo(here, b).distance;
+      if (d < bestD) {
+        bestD = d;
+        best = b;
+      }
+    }
+    return { lon: best.lon, lat: best.lat, name: best.name };
+  }
+  return hud.evaStart ? { ...hud.evaStart, name: "출발 지점" } : null;
+}
+
+function updateReturnVital() {
+  const v = vitals.find((x) => x.id === "ret");
+  const here = getCurrentPosition();
+  const home = hudHome();
+  if (!here || !home || typeof survey === "undefined" || !survey.loaded || typeof envWalkField !== "function") {
+    Object.assign(v, { value: 0, num: "—", sub: "계산 중", color: "#7df9c4" });
+    return;
+  }
+  const homeCell = envCellOf(home);
+  const cell = envCellOf(here);
+  // 각 칸 → 안전한 곳까지의 비용 지도. 30초마다 (걸으며 밝혀진 지형 반영) 또는 안전한 곳 · 나의 정보가 바뀌면 다시 계산
+  const key = `${homeCell}|${PROFILE.slopeLimitDeg}|${EVA.bodyKg}|${EVA.flatSpeedMps}|${Math.floor(Date.now() / 30000)}`;
+  if (hudReturn.key !== key && homeCell !== -1) {
+    const v0 = evaSpeed(0);
+    const flatJPerM = evaMetabolicW(v0, 0) / v0;
+    hudReturn.field = envWalkField([homeCell], { reverse: true, by: "energy", limit: flatJPerM * RETURN_FIELD_M * 1.6 });
+    hudReturn.key = key;
+  }
+  const f = hudReturn.field;
+  const needJ = f && cell !== -1 ? f.energy[cell] : Infinity;
+  if (!Number.isFinite(needJ)) {
+    Object.assign(v, { value: 0, num: "—", sub: "범위 밖", color: "#ff5f5f" });
+    return;
+  }
+  const needL = needJ / (EVA.o2KjPerL * 1000);
+  const margin = typeof profileMargin === "function" ? profileMargin() : 0.2;
+  const usableL = evaState.o2L - EVA.o2TankL * margin; // 안전 여유는 남겨 둠
+  const pct = usableL > 0 ? (1 - needL / usableL) * 100 : -1;
+  v.value = Math.max(0, Math.min(100, pct));
+  v.num = `${Math.max(0, Math.round(f.time[cell] / 60))}분`;
+  v.sub = pct > 0 ? `여유 ${Math.round(pct)}%` : "귀환 불가";
+  v.color = pct <= 0 ? "#ff5f5f" : pct < 30 ? "#ffd166" : "#7df9c4";
 }
 
 // 1초마다 숫자 갱신 (값 자체는 매 프레임 updateEva 에서 줄어듦)

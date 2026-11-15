@@ -1,0 +1,960 @@
+/* =========================================================================
+   Mars Mother — 디자인 시스템 (style.css 뒤에 불러와 겉모습만 통일)
+   -------------------------------------------------------------------------
+   방향: "화성의 밤, 유리" — 따뜻한 어두운 반투명 표면 + 민트 강조색 하나
+   - 배치/동작은 style.css 그대로. 여기서는 색 · 둥글기 · 그림자 · 글자 · 버튼/입력 모양만 맞춤
+   - 값은 전부 아래 토큰(변수)에서 가져옴 → 분위기를 바꾸려면 토큰만 고치면 됨
+   - 이 파일을 index.html 에서 빼면 예전 모습으로 돌아감
+   ========================================================================= */
+
+:root {
+  /* 표면 */
+  --mm-bg: #0e0a08;
+  --mm-glass: rgba(26, 19, 15, 0.72); /* 지도 · HUD 위에 뜨는 유리 */
+  --mm-glass-strong: rgba(22, 16, 13, 0.88);
+  --mm-solid: #191310; /* 메뉴 · 대화창 */
+  --mm-raised: #221a16; /* 그 위에 한 단 올라온 면 (드롭다운 등) */
+  --mm-fill-1: rgba(255, 238, 224, 0.055); /* 칸 · 입력창 바탕 */
+  --mm-fill-2: rgba(255, 238, 224, 0.1); /* 올렸을 때 / 선택됨 */
+  --mm-fill-3: rgba(255, 238, 224, 0.16);
+  --mm-line: rgba(255, 238, 224, 0.1);
+  --mm-line-strong: rgba(255, 238, 224, 0.2);
+
+  /* 글자 */
+  --mm-text: #f6ede5;
+  --mm-text-2: rgba(246, 237, 229, 0.68);
+  --mm-text-3: rgba(246, 237, 229, 0.44);
+
+  /* 강조 (조작할 수 있는 것 · 켜진 것) */
+  --mm-accent: #7df9c4;
+  --mm-accent-ink: #06261b; /* 민트 위 글자 */
+  --mm-accent-soft: rgba(125, 249, 196, 0.14);
+  --mm-accent-line: rgba(125, 249, 196, 0.45);
+
+  /* 의미 색 */
+  --mm-danger: #ff5f5f;
+  --mm-warn: #ffd166;
+  --mm-info: #4cc9f0;
+  --mm-me: #2f62ff; /* 내 위치 */
+
+  /* 모양 */
+  --mm-r-xs: 6px;
+  --mm-r-sm: 10px;
+  --mm-r-md: 14px;
+  --mm-r-lg: 18px;
+  --mm-r-xl: 22px;
+  --mm-r-pill: 999px;
+  --mm-shadow-1: 0 4px 16px rgba(0, 0, 0, 0.32), inset 0 0.5px 0 rgba(255, 255, 255, 0.07);
+  --mm-shadow-2: 0 18px 50px rgba(0, 0, 0, 0.55), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+  --mm-blur: blur(18px) saturate(160%);
+
+  --mm-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+  --mm-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* ---------- 바탕 ---------- */
+html,
+body {
+  font-family: var(--mm-font);
+  background: var(--mm-bg);
+  color: var(--mm-text);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+}
+
+::selection {
+  background: rgba(125, 249, 196, 0.3);
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+button {
+  transition: background-color 0.15s var(--mm-ease), border-color 0.15s var(--mm-ease), color 0.15s var(--mm-ease),
+    transform 0.12s var(--mm-ease), filter 0.15s var(--mm-ease);
+}
+
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* 키보드로 이동할 때만 보이는 테두리 (마우스로 누를 땐 안 보임) */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+}
+
+/* 얇은 스크롤바 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 238, 224, 0.18) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 8px;
+  background: rgba(255, 238, 224, 0.16);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 238, 224, 0.28);
+}
+
+/* =========================================================================
+   1. 지도 위에 뜨는 것: 같은 유리
+   ========================================================================= */
+.menu-btn,
+.circle-btn,
+.scale-bar,
+.hud-card,
+.time-widget__btn,
+.time-widget__panel,
+.cursor-coord,
+.add-hint,
+.globe-loading,
+.globe-msg,
+.hud-loading {
+  background: var(--mm-glass);
+  border: 1px solid var(--mm-line);
+  box-shadow: var(--mm-shadow-1);
+  -webkit-backdrop-filter: var(--mm-blur);
+  backdrop-filter: var(--mm-blur);
+  color: var(--mm-text);
+}
+
+.menu-btn {
+  border-radius: var(--mm-r-md);
+}
+
+.menu-btn:hover,
+.circle-btn:hover,
+.time-widget__btn:hover {
+  background: var(--mm-glass-strong);
+  border-color: var(--mm-line-strong);
+}
+
+.circle-btn {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.circle-btn.is-active {
+  color: var(--mm-accent);
+  border-color: var(--mm-accent-line);
+  background: linear-gradient(var(--mm-accent-soft), var(--mm-accent-soft)), var(--mm-glass);
+}
+
+.scale-bar {
+  border-radius: var(--mm-r-sm);
+}
+
+.scale-bar__label {
+  font-variant-numeric: tabular-nums;
+  color: var(--mm-text);
+}
+
+.cursor-coord {
+  border-radius: var(--mm-r-xs);
+  box-shadow: none;
+  color: var(--mm-text-2);
+}
+
+/* 지도에서 위치 고르기 안내 */
+.add-hint {
+  border-radius: var(--mm-r-pill);
+  border-color: var(--mm-accent-line);
+  color: var(--mm-accent);
+  font-weight: 600;
+}
+
+.add-hint kbd {
+  background: var(--mm-fill-2);
+  color: var(--mm-text);
+}
+
+/* 왼쪽 아래 HUD / 2D 지도 창 */
+.hud-card {
+  border-radius: var(--mm-r-lg);
+}
+
+.hud-card__resize {
+  border-top-right-radius: var(--mm-r-lg);
+  border-color: var(--mm-accent-line);
+}
+
+.hud-card__title {
+  color: var(--mm-accent);
+  letter-spacing: 0.1em;
+}
+
+.hud-card__preview {
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-sm);
+}
+
+/* 시계 */
+.time-widget__btn {
+  border-radius: var(--mm-r-lg);
+}
+
+.time-widget__mars {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.time-widget__unit,
+.time-widget__sub {
+  color: var(--mm-text-2);
+}
+
+.time-widget__live {
+  background: var(--mm-accent-soft);
+  color: var(--mm-accent);
+  border-radius: var(--mm-r-pill);
+}
+
+.time-widget__panel {
+  border-radius: var(--mm-r-lg);
+}
+
+/* =========================================================================
+   2. 왼쪽 메뉴
+   ========================================================================= */
+.drawer {
+  background: var(--mm-solid);
+  border-right: 1px solid var(--mm-line);
+  box-shadow: 12px 0 40px rgba(0, 0, 0, 0.45);
+}
+
+.drawer__header {
+  border-bottom: 1px solid var(--mm-line);
+}
+
+.drawer__title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.drawer__menu-btn {
+  border-radius: var(--mm-r-sm);
+}
+
+.drawer__menu-btn:hover {
+  background: var(--mm-fill-2);
+}
+
+/* 탭: 폴더 모양 → 알약형 분할 버튼 */
+.drawer__tabs {
+  gap: 2px;
+  margin: 14px 16px 0;
+  padding: 3px;
+  border-radius: var(--mm-r-md);
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+}
+
+.drawer__tab {
+  padding: 8px 4px;
+  border: none;
+  border-radius: 11px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mm-text-2);
+}
+
+.drawer__tab:hover {
+  color: var(--mm-text);
+}
+
+.drawer__tab[aria-selected="true"] {
+  background: var(--mm-fill-3);
+  border: none;
+  color: var(--mm-text);
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3), inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* 탭 내용: 테두리 상자를 없애고 메뉴 면에 바로 */
+.drawer__panel {
+  margin: 12px 8px 12px 16px;
+  padding: 4px 8px 8px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.drawer__empty {
+  color: var(--mm-text-3);
+}
+
+/* ---------- 입력창 (메뉴 · 대화창 공통) ---------- */
+.route-stop__input,
+.profile-field__input,
+.point-dialog__field input,
+.point-dialog__field select,
+.time-widget__field input {
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-sm);
+  color: var(--mm-text);
+  transition: border-color 0.15s var(--mm-ease), box-shadow 0.15s var(--mm-ease), background-color 0.15s var(--mm-ease);
+}
+
+.route-stop__input::placeholder,
+.point-dialog__field input::placeholder {
+  color: var(--mm-text-3);
+}
+
+.route-stop__input:hover,
+.profile-field__input:hover,
+.point-dialog__field input:hover,
+.point-dialog__field select:hover,
+.time-widget__field input:hover {
+  border-color: var(--mm-line-strong);
+}
+
+.route-stop__input:focus,
+.profile-field__input:focus,
+.point-dialog__field input:focus,
+.point-dialog__field select:focus,
+.time-widget__field input:focus {
+  outline: none;
+  border-color: var(--mm-accent-line);
+  box-shadow: 0 0 0 3px var(--mm-accent-soft);
+  background: var(--mm-fill-2);
+}
+
+.route-stop__input.is-invalid {
+  border-color: var(--mm-danger);
+  box-shadow: 0 0 0 3px rgba(255, 95, 95, 0.16);
+}
+
+/* ---------- 버튼 (보조 = 옅은 면, 주 = 민트) ---------- */
+.route-btn,
+.point-dialog__btn,
+.inspect__btn,
+.route-stop__btn,
+.pano__btn,
+.time-widget__steps button,
+.dem-control__modes button,
+.survey-legend__reset {
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-sm);
+  color: var(--mm-text);
+  font-weight: 600;
+}
+
+.route-btn:hover:not(:disabled),
+.point-dialog__btn:hover,
+.inspect__btn:hover,
+.route-stop__btn:hover,
+.pano__btn:hover,
+.time-widget__steps button:hover,
+.dem-control__modes button:hover,
+.survey-legend__reset:hover {
+  background: var(--mm-fill-2);
+  border-color: var(--mm-line-strong);
+}
+
+.route-btn.is-primary,
+.point-dialog__btn.is-primary,
+.inspect__btn.is-primary,
+.time-widget__now {
+  background: var(--mm-accent);
+  border: 1px solid transparent;
+  color: var(--mm-accent-ink);
+  font-weight: 700;
+}
+
+.route-btn.is-primary:hover:not(:disabled),
+.point-dialog__btn.is-primary:hover,
+.inspect__btn.is-primary:hover,
+.time-widget__now:hover {
+  background: var(--mm-accent);
+  border-color: transparent;
+  filter: brightness(1.08);
+}
+
+.route-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dem-control__modes button.is-active {
+  background: var(--mm-accent-soft);
+  border-color: var(--mm-accent-line);
+  color: var(--mm-accent);
+}
+
+.route-link {
+  color: var(--mm-accent);
+  font-weight: 600;
+  border-radius: var(--mm-r-xs);
+}
+
+.route-link:hover:not(:disabled) {
+  background: var(--mm-accent-soft);
+}
+
+/* 포인트 추가: 옅은 민트 (보조 강조) */
+.point-panel__add {
+  background: var(--mm-accent-soft);
+  border: 1px solid var(--mm-accent-line);
+  border-radius: var(--mm-r-md);
+  color: var(--mm-accent);
+  font-weight: 700;
+}
+
+.point-panel__add:hover:not(:disabled) {
+  background: rgba(125, 249, 196, 0.22);
+}
+
+/* ---------- 체크박스: 맞춤 모양 (묶음 색을 따라감) ---------- */
+.layer-list input[type="checkbox"],
+.layer-group__toggle,
+.point-group__toggle,
+.point-item__toggle {
+  --chk: var(--pin-color, var(--mm-accent));
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin: 0;
+  border: 1.5px solid var(--mm-line-strong);
+  border-radius: var(--mm-r-xs);
+  background: transparent center / 12px 12px no-repeat;
+  cursor: pointer;
+  transition: background-color 0.15s var(--mm-ease), border-color 0.15s var(--mm-ease), box-shadow 0.15s var(--mm-ease);
+}
+
+.layer-list input[type="checkbox"].is-blue { --chk: #5b9bff; }
+.layer-list input[type="checkbox"].is-red { --chk: var(--mm-danger); }
+
+.layer-list input[type="checkbox"]:hover,
+.layer-group__toggle:hover,
+.point-group__toggle:hover,
+.point-item__toggle:hover {
+  border-color: var(--chk);
+}
+
+.layer-list input[type="checkbox"]:checked,
+.layer-group__toggle:checked,
+.point-group__toggle:checked,
+.point-item__toggle:checked {
+  border-color: var(--chk);
+  background-color: var(--chk);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%230e0a08' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.4l2.4 2.4 4.6-5.2'/%3E%3C/svg%3E");
+}
+
+/* 일부만 켜짐 */
+.layer-group__toggle:indeterminate,
+.point-group__toggle:indeterminate {
+  border-color: var(--chk);
+  background-color: var(--chk);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%230e0a08' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M3 6h6'/%3E%3C/svg%3E");
+}
+
+.layer-group__toggle:disabled,
+.point-group__toggle:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ---------- 레이어 / 포인트 목록 ---------- */
+.layer-list label,
+.point-item,
+.layer-group__title,
+.point-group__title {
+  border-radius: var(--mm-r-sm);
+}
+
+.layer-list label:hover,
+.point-item:hover,
+.layer-group__title:hover,
+.point-group__title:hover {
+  background: var(--mm-fill-1);
+}
+
+.layer-group__fold,
+.point-group__fold {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mm-text);
+}
+
+.layer-list label {
+  color: var(--mm-text-2);
+}
+
+.layer-list label:has(input:checked) {
+  color: var(--mm-text);
+}
+
+.layer-tag {
+  border-radius: var(--mm-r-pill);
+  background: var(--mm-fill-2);
+  color: var(--mm-text-2);
+}
+
+.layer-legend,
+.dem-control {
+  border-radius: var(--mm-r-sm);
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+}
+
+.layer-legend__note,
+.layer-note,
+.point-panel__region,
+.point-item__sub,
+.point-item__none {
+  color: var(--mm-text-3);
+}
+
+.point-item.is-selected {
+  background: var(--mm-fill-2);
+}
+
+.point-item__delete,
+.hud-card__close,
+.photo-viewer__close,
+.inspect__close {
+  border: none;
+  border-radius: 50%;
+  background: var(--mm-fill-2);
+  color: var(--mm-text-2);
+}
+
+.point-item__delete:hover,
+.hud-card__close:hover,
+.photo-viewer__close:hover,
+.inspect__close:hover {
+  background: rgba(255, 95, 95, 0.28);
+  color: #fff;
+}
+
+/* ---------- 길찾기 ---------- */
+.route-stop__label {
+  color: var(--mm-text-3);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.route-suggest {
+  background: var(--mm-raised);
+  border: 1px solid var(--mm-line-strong);
+  border-radius: var(--mm-r-md);
+  box-shadow: var(--mm-shadow-2);
+}
+
+.route-suggest__item {
+  border-radius: var(--mm-r-xs);
+}
+
+.route-suggest__item:hover {
+  background: var(--mm-fill-2);
+}
+
+.route-suggest__sub {
+  color: var(--mm-text-3);
+}
+
+.route-msg {
+  color: var(--mm-text-3);
+}
+
+.route-msg.is-error {
+  color: var(--mm-danger);
+}
+
+.route-tip {
+  color: var(--mm-text-3);
+}
+
+/* 안내 시작 */
+.route-start {
+  background: linear-gradient(var(--mm-solid) 82%, transparent);
+}
+
+.route-start__btn {
+  border-radius: var(--mm-r-md);
+  color: #0e0a08;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+.route-start__hint {
+  color: var(--mm-text-3);
+}
+
+/* 결과 카드 */
+.route-card {
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-md);
+  color: var(--mm-text);
+}
+
+.route-card:hover {
+  background: var(--mm-fill-2);
+  border-color: var(--mm-line-strong);
+}
+
+.route-card.is-selected {
+  background: var(--mm-fill-2);
+  border: 1px solid var(--route-color);
+  box-shadow: 0 0 0 1px var(--route-color), 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.route-card__desc,
+.route-card__axis,
+.route-card__stats dt {
+  color: var(--mm-text-3);
+}
+
+.route-card__summary strong {
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-card__profile {
+  border-radius: var(--mm-r-xs);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.route-card__stats dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.route-card__warnings li {
+  border-radius: var(--mm-r-xs);
+}
+
+/* ---------- 나의 정보 ---------- */
+.profile-field__hint,
+.profile-field__unit {
+  color: var(--mm-text-3);
+}
+
+.profile-summary {
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-md);
+  color: var(--mm-text-2);
+}
+
+/* =========================================================================
+   3. 대화창 · 옆 패널: 같은 면 · 같은 머리말
+   ========================================================================= */
+.photo-viewer,
+.loc-dialog,
+.point-dialog {
+  background: var(--mm-solid);
+  border: 1px solid var(--mm-line-strong);
+  border-radius: var(--mm-r-xl);
+  box-shadow: var(--mm-shadow-2);
+  color: var(--mm-text);
+}
+
+.photo-viewer::backdrop,
+.loc-dialog::backdrop,
+.point-dialog::backdrop {
+  background: rgba(8, 5, 4, 0.62);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.photo-viewer__title,
+.loc-dialog__title,
+.point-dialog__title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.photo-viewer__note,
+.loc-dialog__sub,
+.point-dialog__coords {
+  color: var(--mm-text-3);
+}
+
+.point-dialog__field {
+  color: var(--mm-text-2);
+}
+
+/* 지점 조사 패널 (오른쪽) */
+.inspect-panel {
+  background: var(--mm-solid);
+  border-left: 1px solid var(--mm-line);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, 0.45);
+  color: var(--mm-text);
+}
+
+.inspect__body dt,
+.inspect__note,
+.inspect__about {
+  color: var(--mm-text-3);
+}
+
+/* ---------- 사진 보기 ---------- */
+.pano__controls {
+  background: var(--mm-raised);
+  border-top: 1px solid var(--mm-line);
+}
+
+.pano__badge,
+.pano__heading,
+.pano__hint {
+  background: rgba(14, 10, 8, 0.6);
+  border-radius: var(--mm-r-pill);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.pano__slider {
+  accent-color: var(--mm-accent);
+}
+
+.gallery__title {
+  color: var(--mm-text-2);
+}
+
+.gallery__item {
+  border-radius: var(--mm-r-sm);
+}
+
+.gallery__item.is-active {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+}
+
+.gallery__caption {
+  color: var(--mm-text-3);
+}
+
+.gallery__caption a {
+  color: var(--mm-accent);
+}
+
+/* ---------- 내 위치 찾기 ---------- */
+.loc-source {
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-lg);
+}
+
+.loc-source__info h3 {
+  color: var(--mm-accent);
+}
+
+.loc-source__info dt,
+.loc-source figcaption small,
+.loc-panel figcaption small {
+  color: var(--mm-text-3);
+}
+
+.loc-source__note {
+  color: var(--mm-text-2);
+}
+
+.loc-source__note b {
+  color: var(--mm-accent);
+}
+
+.loc-source canvas,
+.loc-panel canvas {
+  border: 1px solid var(--mm-line);
+  background: #0b0807;
+}
+
+.loc-panel canvas {
+  border-radius: var(--mm-r-md);
+}
+
+.loc-step {
+  border-radius: var(--mm-r-pill);
+  background: var(--mm-fill-1);
+  color: var(--mm-text-3);
+}
+
+.loc-step em {
+  font-style: normal; /* 단계 이름이 기울어져 보이던 것 */
+}
+
+.loc-step span {
+  background: var(--mm-fill-2);
+}
+
+.loc-step[data-state="active"] {
+  background: var(--mm-accent-soft);
+  color: var(--mm-accent);
+}
+
+.loc-step[data-state="active"] span {
+  background: var(--mm-accent);
+  color: var(--mm-accent-ink);
+}
+
+.loc-step[data-state="done"] {
+  color: var(--mm-text-2);
+}
+
+.loc-step[data-state="done"] span {
+  background: rgba(125, 249, 196, 0.22);
+  color: var(--mm-accent);
+}
+
+.loc-result {
+  background: var(--mm-fill-1);
+  border: 1px solid var(--mm-line);
+  border-radius: var(--mm-r-md);
+}
+
+.loc-result__label,
+.loc-result__stats dt,
+.loc-result__sim {
+  color: var(--mm-text-3);
+}
+
+.loc-result__main strong {
+  color: var(--mm-accent);
+}
+
+.loc-result__wait {
+  color: var(--mm-text-2);
+}
+
+/* 시연 버튼: 보조 강조 */
+.loc-real-btn {
+  background: var(--mm-accent-soft);
+  border-color: var(--mm-accent-line);
+  color: var(--mm-accent);
+}
+
+/* =========================================================================
+   4. HUD: 같은 유리 · 같은 알약
+   ========================================================================= */
+.hud-ahead,
+.hud-guide,
+.hud-locate-btn,
+.hud-compass__center,
+.hud-callout__text,
+.hud-terrain {
+  background: var(--mm-glass);
+  border: 1px solid var(--mm-line);
+  box-shadow: var(--mm-shadow-1);
+  -webkit-backdrop-filter: var(--mm-blur);
+  backdrop-filter: var(--mm-blur);
+  font-family: var(--mm-font);
+}
+
+.hud-compass__center {
+  border-radius: var(--mm-r-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 전방 상태: 왼쪽 띠 대신 알약 + 상태 색 점 */
+.hud-ahead {
+  padding: 6px 14px 6px 12px;
+  border-radius: var(--mm-r-pill);
+  border-left-width: 1px;
+  border-color: var(--mm-line);
+}
+
+.hud-ahead::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  vertical-align: 1px;
+}
+
+.hud-guide {
+  border-radius: var(--mm-r-lg);
+  border-color: var(--mm-line-strong);
+}
+
+.hud-guide__label {
+  color: var(--mm-text-3);
+}
+
+.hud-guide__dist {
+  color: var(--mm-text-2);
+}
+
+.hud-locate-btn {
+  border-radius: var(--mm-r-pill);
+  color: var(--mm-text);
+  font-weight: 600;
+}
+
+.hud-locate-btn:hover {
+  background: var(--mm-glass-strong);
+  border-color: var(--mm-accent-line);
+}
+
+.hud-locate-btn svg {
+  color: var(--mm-info);
+}
+
+.hud-callout__text {
+  border-radius: var(--mm-r-xs);
+  box-shadow: none;
+}
+
+.hud-terrain {
+  border-radius: var(--mm-r-lg);
+}
+
+.hud-hint {
+  color: var(--mm-text-3);
+}
+
+.hud-hint kbd {
+  border-color: var(--mm-line-strong);
+  background: var(--mm-glass);
+  color: var(--mm-text-2);
+}
+
+/* 3D 지도 안내 */
+.globe-loading,
+.hud-loading {
+  border-radius: var(--mm-r-pill);
+  border-color: var(--mm-accent-line);
+  color: var(--mm-accent);
+}
+
+.globe-msg {
+  border-radius: var(--mm-r-pill);
+  border-color: rgba(255, 95, 95, 0.5);
+  color: #ffb3b3;
+}
+
+.globe-hint {
+  color: var(--mm-text-3);
+}
+
+/* 드롭다운: 기본 화살표 대신 얇은 꺾쇠 */
+.point-dialog__field select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23f6ede5' stroke-opacity='.7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}

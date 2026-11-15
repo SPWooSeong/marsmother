@@ -125,6 +125,7 @@ button {
 /* 선 굵기: 지도 확대(CSS transform)와 상관없이 화면에서 같은 굵기 (--inv-scale = 1 / 지도 배율, main.js applyView) */
 .map-route {
   fill: none;
+  paint-order: stroke;
   stroke-width: calc(3px * var(--inv-scale, 1));
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -1004,7 +1005,7 @@ button {
   stroke-width: calc(3px * var(--inv-scale, 1));
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-opacity: 0.45;
+  stroke-opacity: 0.8;
 }
 
 .nav-route.is-selected {
@@ -1012,10 +1013,28 @@ button {
   stroke-opacity: 1;
 }
 
+/* 테두리 (DEM · 히트맵 같은 색 지도 위에서도 선이 보이게)
+   고르지 않은 경로: 어두운 테두리 / 고른 경로: 어두운 테두리 + 흰 테두리 + 경로 색 */
 .nav-route--outline {
-  stroke: rgba(0, 0, 0, 0.7);
-  stroke-width: calc(9px * var(--inv-scale, 1));
+  stroke: rgba(12, 8, 6, 0.75);
+  stroke-width: calc(6px * var(--inv-scale, 1));
   stroke-opacity: 1;
+}
+
+.nav-route--outline.is-selected {
+  stroke-width: calc(12px * var(--inv-scale, 1));
+}
+
+.nav-route--halo.is-selected {
+  stroke: #fff;
+  stroke-width: calc(8.5px * var(--inv-scale, 1));
+  stroke-opacity: 1;
+}
+
+/* 경로 층: 과학 레이어 캔버스 · 고해상도 패치(z-index 1)보다 위 */
+.map__layer--routes {
+  z-index: 2;
+  pointer-events: none;
 }
 
 .route-card__warnings {
@@ -2280,8 +2299,8 @@ body.is-hud .hud-card__close {
 .hud-ring[data-id="o2"] { right: 0; bottom: 20px; }
 .hud-ring[data-id="rad"] { right: 9px; bottom: 131px; }
 .hud-ring[data-id="fatigue"] { right: 68px; bottom: 120px; }
-.hud-ring[data-id="water"] { right: 107px; bottom: 74px; }
-.hud-ring[data-id="power"] { right: 107px; bottom: 14px; }
+.hud-ring[data-id="ret"] { right: 107px; bottom: 74px; } /* 귀환 여유 */
+.hud-ring[data-id="low"] { right: 107px; bottom: 14px; } /* 냉각수 · 전력: 부족할 때만 나타남 */
 
 /* HUD 창: 2D 지도 모드에서는 HUD 미리보기, HUD 모드에서는 미니맵 */
 .hud-card__preview {
@@ -3183,19 +3202,19 @@ body.is-hud-peek .hud-card__close {
 }
 
 /* =========================================================
-   HUD 발밑 지형 정보 — 위 가운데 상태 묶음(방위 → 전방 상태) 바로 아래의 작은 유리 캡슐 (Apple 스타일)
-   방위 표시줄(.hud-compass) 안에 있어서 화면 크기에 따라 함께 움직임
+   HUD 발밑 지형 정보 — 오른쪽 위 시계 바로 아래의 작은 세로 카드 (위젯처럼 쌓임)
+   화면 가운데(경로 · 목적지 표시)는 비워 둠. 폰 크기에서는 오른쪽 아래 상태 링 위의 가로 캡슐
    ========================================================= */
 .hud-terrain {
   position: absolute;
-  top: calc(100% + 70px); /* 전방 상태 아래 */
-  left: 50%;
-  transform: translateX(-50%);
+  top: 74px; /* 간략한 시계 아래 */
+  right: 24px;
+  z-index: 3;
   display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100vw - 32px);
-  padding: 6px 12px 6px 14px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 152px;
+  padding: 10px 14px;
   border-radius: 16px;
   background: rgba(28, 28, 30, 0.5);
   border: 0.5px solid rgba(255, 255, 255, 0.16);
@@ -3208,22 +3227,17 @@ body.is-hud-peek .hud-card__close {
   pointer-events: none;
 }
 
+/* 한 줄 = 왼쪽 이름 · 오른쪽 값 */
 .hud-terrain__item {
   display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-/* 항목 사이 얇은 구분선 */
-.hud-terrain__item + .hud-terrain__item {
-  padding-left: 12px;
-  border-left: 0.5px solid rgba(255, 255, 255, 0.18);
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
 }
 
 .hud-terrain__label {
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.02em;
   color: rgba(235, 235, 245, 0.6);
 }
 
@@ -3248,12 +3262,11 @@ body.is-hud-peek .hud-card__close {
 .hud-terrain__dot.is-high { background: #ff453a; }
 
 .hud-terrain__src {
-  padding: 2px 7px;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.12);
+  align-self: flex-end;
+  margin-top: 2px;
   font-size: 9.5px;
   font-weight: 500;
-  color: rgba(235, 235, 245, 0.7);
+  color: rgba(235, 235, 245, 0.45);
 }
 
 .hud-terrain__msg {
@@ -3262,11 +3275,37 @@ body.is-hud-peek .hud-card__close {
 }
 
 @media (max-width: 1100px) {
-  .hud-terrain__src { display: none; }
-  /* 경로 안내 카드는 지형 정보 캡슐 아래로 */
-  body.is-hud .hud-guide { top: 186px; }
+  /* 경로 안내 카드: 전방 상태 아래, 오른쪽 지형 카드와 겹치지 않는 폭까지 */
+  body.is-hud .hud-guide { top: 136px; max-width: calc(100vw - 48px - 190px); }
 }
 
+/* 폰 크기: 위쪽은 방위 표시줄이 한 줄을 다 쓰므로, 오른쪽 아래 상태 링 위의 가로 캡슐로 */
 @media (max-width: 640px) {
-  body.is-hud .hud-guide { top: 250px; }
+  .hud-terrain {
+    top: auto;
+    right: 16px;
+    bottom: 226px;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 6px 12px;
+  }
+  .hud-terrain__item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+  .hud-terrain__item + .hud-terrain__item {
+    padding-left: 10px;
+    border-left: 0.5px solid rgba(255, 255, 255, 0.18);
+  }
+  .hud-terrain__label { font-size: 9.5px; }
+  .hud-terrain__src { display: none; }
+  body.is-hud .hud-guide { top: 200px; max-width: none; }
+}
+
+/* HUD 에서 메뉴를 열어 2D 지도를 보는 동안: 왼쪽 아래 HUD 창은 숨김 (메뉴를 닫으면 HUD 로 돌아가며 다시 보임) */
+body.is-hud-drawer-peek .hud-card {
+  display: none;
 }
