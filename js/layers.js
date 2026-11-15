@@ -634,25 +634,128 @@ const RAMP_LEGENDS = {
   },
 };
 
+// 히트맵(지도 전체를 색으로 덮는) 레이어의 종류. 같은 종류끼리는 같이 켤 수 있고 (MOLA + HiRISE 고도는 색 기준이 같음),
+// 다른 종류를 켜면 먼저 켜져 있던 종류는 자동으로 꺼짐 — 무지개색 지도가 겹치면 읽을 수 없어서
+const HEATMAP_FAMILY = { mola_dem: "dem", hirise_dem: "dem", ti_overlay: "thermal", radiation: "radiation" };
+
+const layerInput = (id) => layerListEl.querySelector(`input[data-layer="${id}"]`);
+
+// 체크박스 하나 켜고 끄기 (화면 표시 + 다른 히트맵 끄기 + 그룹 제목 갱신)
+function toggleLayer(id, on) {
+  const input = layerInput(id);
+  if (input) input.checked = on;
+  setLayerVisible(id, on);
+  const family = HEATMAP_FAMILY[id];
+  if (on && family) {
+    for (const [other, f] of Object.entries(HEATMAP_FAMILY)) {
+      const el = layerInput(other);
+      if (f !== family && el && el.checked) {
+        el.checked = false;
+        setLayerVisible(other, false);
+      }
+    }
+  }
+  updateLayerGroups();
+}
+
+// ---------- 레이어 그룹 (접기/펼치기 · 그룹 전체 켜기/끄기) ----------
+const LAYER_FOLD_KEY = "marsmother.layerGroupsCollapsed";
+const collapsedLayerGroups = new Set(
+  (() => {
+    try {
+      return JSON.parse(localStorage.getItem(LAYER_FOLD_KEY)) || [];
+    } catch {
+      return [];
+    }
+  })()
+);
+
+function updateLayerGroups() {
+  layerListEl.querySelectorAll(".layer-group").forEach((group) => {
+    const inputs = [...group.querySelectorAll("input[data-layer]")];
+    const on = inputs.filter((i) => i.checked).length;
+    const fold = group.querySelector(".layer-group__fold");
+    fold.textContent = `${fold.dataset.name} (${inputs.length})`;
+    const toggle = group.querySelector(".layer-group__toggle");
+    // 히트맵은 종류당 하나씩만 켜지므로 '전부 켜짐' 은 켤 수 있는 만큼 켜진 상태
+    toggle.checked = on > 0 && on >= groupOnTargets(inputs).length;
+    toggle.indeterminate = on > 0 && !toggle.checked;
+  });
+}
+
+// 그룹 전체 켜기에서 켤 레이어: 히트맵은 종류가 겹치지 않게 첫 종류만
+function groupOnTargets(inputs) {
+  let family = null;
+  return inputs.filter((i) => {
+    const f = HEATMAP_FAMILY[i.dataset.layer];
+    if (!f) return true;
+    if (family === null) family = f;
+    return f === family;
+  });
+}
+
+function initLayerGroups() {
+  layerListEl.querySelectorAll(".layer-group").forEach((group) => {
+    const id = group.dataset.group;
+    const fold = group.querySelector(".layer-group__fold");
+    fold.dataset.name = fold.textContent;
+    const setCollapsed = (collapsed) => {
+      group.classList.toggle("is-collapsed", collapsed);
+      fold.setAttribute("aria-expanded", String(!collapsed));
+    };
+    setCollapsed(collapsedLayerGroups.has(id));
+    fold.addEventListener("click", () => {
+      const collapsed = !group.classList.contains("is-collapsed");
+      if (collapsed) collapsedLayerGroups.add(id);
+      else collapsedLayerGroups.delete(id);
+      try {
+        localStorage.setItem(LAYER_FOLD_KEY, JSON.stringify([...collapsedLayerGroups]));
+      } catch {
+        // 저장 실패 시 이번 접속 동안만 유지
+      }
+      setCollapsed(collapsed);
+    });
+
+    const toggle = group.querySelector(".layer-group__toggle");
+    toggle.addEventListener("change", () => {
+      const inputs = [...group.querySelectorAll("input[data-layer]")];
+      const targets = toggle.checked ? groupOnTargets(inputs) : [];
+      for (const input of inputs) toggleLayer(input.dataset.layer, targets.includes(input));
+      saveLayerState();
+    });
+  });
+}
+
 // ---------- 시작 ----------
 function initLayers() {
   const saved = loadLayerState();
-  layerListEl.querySelector('input[data-layer="hirise_dem"]').closest("li").after(demControlEl);
+  layerInput("hirise_dem").closest("li").after(demControlEl);
+  initLayerGroups();
 
-  layerListEl.querySelectorAll("input[data-layer]").forEach((input) => {
+  const inputs = [...layerListEl.querySelectorAll("input[data-layer]")];
+  for (const input of inputs) {
     const id = input.dataset.layer;
     const li = input.closest("li");
     const def = VECTOR_LAYERS.find((l) => l.id === id);
     if (def) renderLegend(li, def.legend, def.note);
     if (RAMP_LEGENDS[id]) renderRampLegend(li, ...RAMP_LEGENDS[id]());
-
     if (id in saved) input.checked = saved[id];
-    setLayerVisible(id, input.checked);
     input.addEventListener("change", () => {
-      setLayerVisible(id, input.checked);
+      toggleLayer(id, input.checked);
       saveLayerState();
     });
-  });
+  }
+  // 저장된 상태에 히트맵이 여러 종류 켜져 있으면 첫 종류만 남김
+  let family = null;
+  for (const input of inputs) {
+    const f = HEATMAP_FAMILY[input.dataset.layer];
+    if (f && input.checked) {
+      if (family === null) family = f;
+      else if (f !== family) input.checked = false;
+    }
+    setLayerVisible(input.dataset.layer, input.checked);
+  }
+  updateLayerGroups();
 }
 
 if (mapImage.complete && mapImage.naturalWidth) initLayers();

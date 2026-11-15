@@ -316,8 +316,9 @@ button {
   position: absolute;
   inset: 0;
   z-index: 100;
-  /* 길찾기 결과가 지도에서 보이도록 옅게 */
-  background: rgba(0, 0, 0, 0.15);
+  /* 메뉴를 열어 둔 채로도 지도를 조작할 수 있게: 화면을 어둡게 덮지 않고 입력도 막지 않음 (닫기는 × 버튼 · Esc) */
+  background: none;
+  pointer-events: none;
 }
 
 .drawer {
@@ -458,6 +459,99 @@ button {
 .layer-list input.is-red { accent-color: #ff4a4a; }
 
 .layer-list input:disabled { cursor: default; }
+
+/* 레이어 그룹 (포인트 탭의 그룹과 같은 모양: 제목을 누르면 접기/펼치기, 체크박스는 그룹 전체) */
+.layer-group + .layer-group {
+  margin-top: 6px;
+}
+
+.layer-group__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.layer-group__title:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.layer-group__title::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pin-color);
+}
+
+.layer-group__fold {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layer-group__fold::after {
+  content: "▾";
+  margin-left: auto;
+  margin-right: 4px;
+  font-size: 12px;
+  color: rgba(244, 233, 225, 0.6);
+  transition: transform 0.15s;
+}
+
+.layer-group.is-collapsed .layer-group__fold::after {
+  transform: rotate(-90deg);
+}
+
+.layer-group.is-collapsed .layer-list {
+  display: none;
+}
+
+.layer-group.is-collapsed .layer-group__title {
+  margin-bottom: 0;
+}
+
+.layer-group__toggle {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--pin-color);
+  cursor: pointer;
+}
+
+.layer-group .layer-list {
+  padding-left: 12px;
+}
+
+.layer-group .layer-list label {
+  padding: 8px 6px;
+  font-size: 14px;
+}
+
+/* 지도 전체를 색으로 덮는 레이어 표시 (한 종류만 켜짐) */
+.layer-tag {
+  margin-left: 6px;
+  margin-right: auto;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(244, 233, 225, 0.65);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 .layer-list__group {
   margin: 12px 6px 2px;
@@ -2801,6 +2895,30 @@ body.is-3d .scale-bar {
 
 .hud-loading[hidden] {
   display: none;
+}
+
+/* HUD: 현재 위치 보정 버튼 (미니맵 바로 위) */
+.hud-locate-btn {
+  position: absolute;
+  left: 24px;
+  bottom: 168px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid rgba(76, 201, 240, 0.55);
+  border-radius: 20px;
+  background: rgba(10, 14, 20, 0.72);
+  color: #bfefff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hud-locate-btn:hover {
+  background: rgba(76, 201, 240, 0.2);
 }
 
 .hud-source {

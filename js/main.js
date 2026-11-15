@@ -896,7 +896,7 @@ function setDrawerOpen(open) {
 
 menuBtn.addEventListener("click", () => setDrawerOpen(true));
 drawerCloseBtn.addEventListener("click", () => setDrawerOpen(false));
-drawerBackdrop.addEventListener("click", () => setDrawerOpen(false));
+// 메뉴 밖을 눌러도 닫히지 않음 (메뉴를 연 채로 지도를 조작할 수 있게). 닫기: × 버튼 · Esc
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setDrawerOpen(false);
 });

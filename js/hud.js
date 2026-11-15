@@ -5,7 +5,7 @@
 //       3D를 쓸 수 없으면 360° 파노라마 사진으로 대신 표시.
 // 지형 스캔(안전/주의/위험)은 실제 DEM 경사로 계산.
 // 생체/장비 상태는 실제 지형 위를 걷는 만큼 js/eva.js 보행 모델로 계산 (산소 · 냉각수 · 전력 · 피로도),
-// 방사선은 js/marstime.js 모델. 경로 안내는 길찾기와 같은 DEM 기반 A* 경로.
+// 방사선은 js/marstime.js 모델. 경로 안내는 길찾기 탭에서 고른 경로가 있을 때만 표시.
 // 실제 장비가 생기면 바꿀 곳: 카메라 영상(배경), 방위 센서(hud.heading), 위치 장비(getCurrentPosition), 우주복 센서(evaState)
 //
 // 사용하는 전역 값: REGIONS, currentRegion, POINT_TYPES, getPoints, mapImage, lonLatToImage,
@@ -56,8 +56,7 @@ const hud = {
   bob: 0, // 걸을 때 화면 흔들림
   moving: false,
   world: { e: 0, n: 0 }, // 지역 중심 기준 내 위치 (m, 동/북)
-  autoRoute: null, // 길찾기 결과가 없을 때 현위치 → 목적지로 직접 계산한 실제 경로
-  autoRouteKey: "",
+
 };
 
 // 파노라마 비율 읽기
@@ -84,7 +83,6 @@ function setHudMode(on) {
     hud.lastT = 0;
     hud.keys.clear();
     syncWorldPosition();
-    prepareAutoRoute();
     initTerrain3D(); // 처음 한 번 실제 지형(DEM) 불러오기 (비동기)
     resizeTerrain3D();
     hud.raf = requestAnimationFrame(hudFrame);
@@ -97,6 +95,15 @@ function setHudMode(on) {
 }
 
 hudPreview.addEventListener("click", () => setHudMode(!hud.on));
+
+// 현재 위치 보정: 2D 지도의 ◎ 버튼과 같은 '지형 매칭 위치 추정' 창을 엶 (js/localize.js)
+document.getElementById("hud-locate-btn").addEventListener("click", () => locBtn.click());
+
+// 위치가 보정되면 HUD 의 내 위치 · 발밑 타일을 그곳으로
+document.addEventListener("positionchange", () => {
+  syncWorldPosition();
+  if (hud3d.ready) resetHudTiles();
+});
 
 // ---------- 화면 계산 (원통형 파노라마 기준) ----------
 function hudLayout() {
@@ -310,13 +317,10 @@ function arTargets() {
       ...bearingTo(here, p),
     }));
 
-  // 길찾기 도착지가 있으면 목적지로 표시 (없으면 자동 경로의 목적지)
+  // 길찾기에서 경로를 골랐을 때만 도착지를 목적지로 표시
   const end = nav.stops[nav.stops.length - 1];
-  if (end.lonLat) {
+  if (currentHudRoute() && end.lonLat) {
     targets.push({ name: `도착지${end.name ? " · " + end.name : ""}`, color: "#b38cff", isGoal: true, ...bearingTo(here, end.lonLat) });
-  } else if (hud.autoRoute) {
-    const d = hud.autoRoute;
-    targets.push({ name: `목적지 · ${d.destName}`, color: "#b38cff", isGoal: true, ...bearingTo(here, d.path[d.path.length - 1]) });
   }
   return targets;
 }
@@ -615,36 +619,10 @@ const hudGuideWarn = document.getElementById("hud-guide-warn");
 const ROUTE_AHEAD_M = 160; // 바닥에 그릴 경로 길이 (앞쪽)
 const OFF_ROUTE_M = 15;
 
-// 길찾기 결과가 없으면 현위치 → (도착지 또는 Home Plate) 경로를 실제 지형으로 계산 (안전한 길 기준)
-async function prepareAutoRoute() {
-  if (nav.results.some((r) => r.id === nav.selectedId)) return;
-  const here = getCurrentPosition();
-  if (!here) return;
-  const end = nav.stops[nav.stops.length - 1];
-  let dest = end.lonLat ? { ...end.lonLat, name: end.name || "도착지" } : null;
-  if (!dest) {
-    const points = getPoints().filter((p) => p.lon != null);
-    const p = points.find((q) => q.id === "home-plate") || points[0];
-    if (p) dest = { lon: p.lon, lat: p.lat, name: p.name };
-  }
-  if (!dest) return;
-  // 같은 출발 · 도착이면 다시 계산하지 않음 (걷는 동안 출발점은 50 m 단위로만 봄)
-  const key = `${here.lon.toFixed(3)},${here.lat.toFixed(3)}>${dest.lon},${dest.lat}`;
-  if (key === hud.autoRouteKey) return;
-  hud.autoRouteKey = key;
-  try {
-    const [r] = await findRoutes([{ lon: here.lon, lat: here.lat }, dest], [ROUTE_OPTIONS[0]]);
-    hud.autoRoute = r ? { ...r, destName: dest.name, isAuto: true } : null;
-  } catch (e) {
-    console.warn("HUD 경로를 계산하지 못했어요.", e);
-    hud.autoRoute = null;
-  }
-}
-
+// HUD 경로 = 길찾기 탭에서 고른 경로 (없으면 경로 안내 없이 주변 모습만)
 function currentHudRoute() {
   const sel = nav.results.find((r) => r.id === nav.selectedId);
-  if (sel) return { ...sel, destName: nav.stops[nav.stops.length - 1].name || "도착지", isAuto: false };
-  return hud.autoRoute;
+  return sel ? { ...sel, destName: nav.stops[nav.stops.length - 1].name || "도착지" } : null;
 }
 
 // 경로 → 지역 기준 미터 좌표 + 누적 거리 (경로가 바뀔 때만 계산)
@@ -752,7 +730,7 @@ function updateRouteGuide(L, now) {
   hudGuideArrow.style.transform = `rotate(${turn}deg)`;
 
   const speedMps = route.distanceM / Math.max(route.hours * 3600, 1);
-  hudGuideLabel.textContent = `${route.isAuto ? "자동 경로" : "길찾기 경로"} · ${route.name}`;
+  hudGuideLabel.textContent = `길찾기 경로 · ${route.name}`;
   hudGuideDest.textContent = route.destName;
   hudGuideDist.textContent = `남은 거리 ${formatKm(remaining)} · 약 ${formatDuration(remaining / speedMps / 3600)}`;
 
@@ -763,7 +741,6 @@ function updateRouteGuide(L, now) {
     state = "is-arrived";
   } else if (near.d > OFF_ROUTE_M) {
     warn = `경로에서 ${Math.round(near.d)}m 벗어났어요`;
-    if (route.isAuto && near.d > 60) prepareAutoRoute(); // 많이 벗어나면 지금 위치에서 다시 계산
     state = "is-off";
   } else if (Math.abs(turn) > 35) {
     warn = `${turn > 0 ? "오른쪽" : "왼쪽"}으로 ${Math.round(Math.abs(turn))}° 돌아가세요`;
@@ -795,6 +772,8 @@ const hud3d = {
   grids: [], // 월드 좌표로 옮긴 DEM 격자 (정밀한 것부터) — 고도 · 경사 조회용
   dataPromise: null,
   origin: { e: 0, n: 0 }, // 화성 곡률 계산의 기준점 (처음 서 있던 곳)
+  tiles: new Map(), // "r-c" → { mesh, loading } 발밑 고해상도 타일
+  tileCheckT: 0,
 };
 const hudLoading = document.getElementById("hud-loading");
 const hudTerrainCanvas = document.getElementById("hud-3d");
@@ -1013,7 +992,8 @@ async function initTerrain3D() {
     // 광역(MOLA)은 사진이 없어 화성 색 + 음영만
     if (wide) scene.add(terrainMesh(wide, 516, 500, new THREE.MeshLambertMaterial({ color: 0x8a6548 }), { lift: -3, hole: far }));
     scene.add(terrainMesh(far, 300, 290, photoMaterial(farTex), { lift: -1.5, hole: near }));
-    scene.add(terrainMesh(near, 600, 600, photoMaterial(nearTex))); // 5 m 간격 (경사 계산은 2 m 격자 그대로)
+    // 5 m 간격 (경사 계산은 2 m 격자 그대로). 발밑은 고해상도 타일이 덮으므로 그 아래로 살짝 내림
+    scene.add(terrainMesh(near, 600, 600, photoMaterial(nearTex), { lift: -0.4 }));
 
     Object.assign(hud3d, { renderer, scene, camera, ready: true });
     hudTerrainCanvas.hidden = false;
@@ -1050,7 +1030,116 @@ function updateTerrainCamera() {
   cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
 }
 
+// ---------- 발밑 고해상도 타일 (0.25 m/px 사진 + 2 m 간격 지형) ----------
+// 근거리 3 km 를 250 m 타일 12 × 12 장으로 나눠 두고 (js/data/hud_tiles.js),
+// 서 있는 타일과 그 주변 8장만 불러옴. 멀어진 타일은 메모리에서 지움.
+const TILE_SEGMENTS = 125; // 250 m / 2 m (근거리 DEM 간격)
+const TILE_KEEP = 2; // 이 칸 수보다 멀어지면 지움
+
+function tileWorldBounds(r, c) {
+  const t = HUD_TILES;
+  const b = t.bounds;
+  const dLon = (b.lonMax - b.lonMin) / t.cols;
+  const dLat = (b.latMax - b.latMin) / t.rows;
+  const nw = worldOf({ lon: b.lonMin + c * dLon, lat: b.latMax - r * dLat });
+  const se = worldOf({ lon: b.lonMin + (c + 1) * dLon, lat: b.latMax - (r + 1) * dLat });
+  return { e0: nw.e, e1: se.e, n0: se.n, n1: nw.n };
+}
+
+function tileMesh(r, c, texture) {
+  const { e0, e1, n0, n1 } = tileWorldBounds(r, c);
+  const seg = TILE_SEGMENTS;
+  const geo = new THREE.PlaneGeometry(e1 - e0, n1 - n0, seg, seg);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  const nor = geo.attributes.normal;
+  for (let y = 0; y <= seg; y++) {
+    for (let x = 0; x <= seg; x++) {
+      const e = e0 + ((e1 - e0) * x) / seg;
+      const n = n1 - ((n1 - n0) * y) / seg;
+      const i = y * (seg + 1) + x;
+      pos.setY(i, sceneY(e, n));
+      // 음영용 법선: 타일 경계에서도 이어지도록 메시가 아니라 지형 기울기에서 직접 계산 (장면 좌표: x = 동, y = 위, z = -북)
+      const ge = (terrainHeight(e + 2, n) - terrainHeight(e - 2, n)) / 4;
+      const gn = (terrainHeight(e, n + 2) - terrainHeight(e, n - 2)) / 4;
+      const len = Math.hypot(ge, 1, gn);
+      nor.setXYZ(i, -ge / len, 1 / len, gn / len);
+    }
+  }
+  const mesh = new THREE.Mesh(geo, photoMaterial(texture));
+  mesh.position.set((e0 + e1) / 2, 0, -(n0 + n1) / 2);
+  return mesh;
+}
+
+function updateHudTiles(now) {
+  if (typeof HUD_TILES === "undefined" || now - hud3d.tileCheckT < 300) return;
+  hud3d.tileCheckT = now;
+  const here = getCurrentPosition();
+  const t = HUD_TILES;
+  const b = t.bounds;
+  const c0 = Math.floor(((here.lon - b.lonMin) / (b.lonMax - b.lonMin)) * t.cols);
+  const r0 = Math.floor(((b.latMax - here.lat) / (b.latMax - b.latMin)) * t.rows);
+
+  // 필요한 타일 불러오기 (가까운 것부터)
+  const wanted = [];
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const r = r0 + dr, c = c0 + dc;
+      if (r >= 0 && c >= 0 && r < t.rows && c < t.cols) wanted.push([Math.abs(dr) + Math.abs(dc), r, c]);
+    }
+  }
+  wanted.sort((a, b) => a[0] - b[0]);
+  for (const [, r, c] of wanted) {
+    const key = `${r}-${c}`;
+    if (hud3d.tiles.has(key)) continue;
+    const entry = { loading: true, mesh: null };
+    hud3d.tiles.set(key, entry);
+    new THREE.TextureLoader().load(
+      t.url.replace("{r}", r).replace("{c}", c),
+      (tex) => {
+        if (hud3d.tiles.get(key) !== entry) return tex.dispose(); // 그 사이 지워짐
+        entry.mesh = tileMesh(r, c, tex);
+        entry.loading = false;
+        hud3d.scene.add(entry.mesh);
+      },
+      undefined,
+      () => {
+        if (hud3d.tiles.get(key) === entry) hud3d.tiles.delete(key); // 실패하면 다음 확인 때 다시 시도
+      }
+    );
+  }
+
+  // 멀어진 타일 지우기
+  for (const [key, entry] of hud3d.tiles) {
+    const [r, c] = key.split("-").map(Number);
+    if (Math.abs(r - r0) <= TILE_KEEP && Math.abs(c - c0) <= TILE_KEEP) continue;
+    if (entry.mesh) {
+      hud3d.scene.remove(entry.mesh);
+      entry.mesh.geometry.dispose();
+      entry.mesh.material.map.dispose();
+      entry.mesh.material.dispose();
+    }
+    hud3d.tiles.delete(key);
+  }
+}
+
+// 위치가 크게 바뀌면 (위치 보정 등) 타일을 모두 새로 고름
+function resetHudTiles() {
+  for (const [key] of hud3d.tiles) {
+    const entry = hud3d.tiles.get(key);
+    if (entry.mesh) {
+      hud3d.scene.remove(entry.mesh);
+      entry.mesh.geometry.dispose();
+      entry.mesh.material.map.dispose();
+      entry.mesh.material.dispose();
+    }
+  }
+  hud3d.tiles.clear();
+  hud3d.tileCheckT = 0;
+}
+
 function renderTerrain3D() {
+  updateHudTiles(performance.now());
   updateTerrainCamera();
   hud3d.renderer.render(hud3d.scene, hud3d.camera);
 }
