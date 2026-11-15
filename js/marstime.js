@@ -274,3 +274,56 @@ setInterval(() => {
 renderClock();
 // 현위치 방사선 숫자에 필요한 DEM 을 미리 읽어 둠 (file:// 에서는 실패 → 숫자만 "계산 중")
 Promise.allSettled(["hirise", "mola"].map(loadDemGrid)).then(renderClock);
+
+// ---------- 태양 위치 · 일몰 · 기온 일주기 ----------
+const MARS_OBLIQUITY_DEG = 25.19;
+const MARS_HOUR_MS = MARS_SOL_MS / 24; // 화성 1시간 (지구 약 61.6분)
+
+// 태양 고도 · 방위 (°, 방위는 북 0 · 동 90) 와 태양 쪽 단위 벡터 (동, 북, 위)
+function sunPosition(date, lonE, latN) {
+  const t = marsTime(date, lonE);
+  const dec = Math.asin(Math.sin(rad(MARS_OBLIQUITY_DEG)) * Math.sin(rad(t.ls)));
+  const H = rad((t.ltst - 12) * 15);
+  const phi = rad(latN);
+  const up = Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H);
+  const east = -Math.cos(dec) * Math.sin(H);
+  const north = Math.sin(dec) * Math.cos(phi) - Math.cos(dec) * Math.sin(phi) * Math.cos(H);
+  return {
+    elevationDeg: (Math.asin(Math.max(-1, Math.min(1, up))) * 180) / Math.PI,
+    azimuthDeg: mod((Math.atan2(east, north) * 180) / Math.PI, 360),
+    east, north, up,
+    time: t,
+  };
+}
+
+// 해 뜨는 시각 · 지는 시각 (지방 진태양시) 과 지금부터 일몰까지 남은 시간 (ms, 밤이면 0)
+function sunTimes(date, lonE, latN) {
+  const t = marsTime(date, lonE);
+  const dec = Math.asin(Math.sin(rad(MARS_OBLIQUITY_DEG)) * Math.sin(rad(t.ls)));
+  const c = Math.max(-1, Math.min(1, -Math.tan(rad(latN)) * Math.tan(dec)));
+  const half = ((Math.acos(c) * 180) / Math.PI) / 15; // 낮 길이의 절반 (화성 시간)
+  const sunrise = 12 - half, sunset = 12 + half;
+  const isDay = t.ltst > sunrise && t.ltst < sunset;
+  return {
+    sunrise, sunset, isDay, ltst: t.ltst,
+    msToSunset: isDay ? (sunset - t.ltst) * MARS_HOUR_MS : 0,
+    msToSunrise: isDay ? 0 : mod(sunrise - t.ltst, 24) * MARS_HOUR_MS,
+  };
+}
+
+// 지표 부근 기온 (°C) — Gusev (Spirit Mini-TES · REMS 류 관측의 전형적 일주기에 맞춘 근사)
+//  한낮 13:30 쯤 최고, 해 뜨기 직전 최저. 남반구 여름(Ls 250° 부근)에 더 따뜻함
+//  그늘은 낮 동안 더 춥고, 모래(열관성 낮음)는 일교차가 큼
+function surfaceTempC(date, lonE, latN, { shadow = false, eta = 1.1 } = {}) {
+  const t = marsTime(date, lonE);
+  const season = Math.cos(rad(t.ls - (latN < 0 ? 250 : 70)));
+  const mean = -58 + 12 * season;
+  const amp = (36 + 4 * season) * (1 + 0.2 * Math.max(0, eta - 1.1));
+  // 해 뜬 뒤(6시) 빨리 데워져 13:30 에 최고, 그 뒤 밤새 천천히 식는 비대칭 일주기
+  const wave =
+    t.ltst >= 6 && t.ltst < 13.5
+      ? -Math.cos((Math.PI * (t.ltst - 6)) / 7.5)
+      : 1 - 2 * (1 - Math.pow(1 - mod(t.ltst - 13.5, 24) / 16.5, 2.2));
+  const dayness = Math.max(0, Math.cos(rad((t.ltst - 12) * 15)));
+  return mean + amp * Math.max(-1, Math.min(1, wave)) - (shadow ? 14 * dayness : 0);
+}

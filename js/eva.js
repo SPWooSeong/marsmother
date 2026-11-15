@@ -65,6 +65,21 @@ const EVA_MIN_J_PER_M = (() => {
   return best;
 })();
 
+// 지금 설정(몸무게)에서 가장 단단한 땅(η 1.0) 기준 최솟값 — 길찾기 휴리스틱이 실제 비용을 넘지 않게
+let evaMinJCache = { key: null, value: 0 };
+function evaMinJPerM() {
+  const key = `${EVA.bodyKg}|${EVA.suitKg}|${EVA.flatSpeedMps}`;
+  if (evaMinJCache.key !== key) {
+    let best = Infinity;
+    for (let g = -0.6; g <= 0.6; g += 0.005) {
+      const v = evaSpeed(g, 1.0);
+      best = Math.min(best, evaMetabolicW(v, g, 1.0) / v / Math.sqrt(1 + g * g));
+    }
+    evaMinJCache = { key, value: best };
+  }
+  return evaMinJCache.value;
+}
+
 // ---------- 지표 물질: 모래 빠짐 위험 (TES 열관성, 약 7 km 해상도) ----------
 // 열관성 레이어의 다각형 안에 있는지 확인 (data/layers.js 의 SCIENCE_LAYERS.ti_sand_trap)
 function sandRiskAt(lon, lat) {
@@ -85,7 +100,14 @@ function sandRiskAt(lon, lat) {
 }
 
 const SAND_ETA = { high: 1.8, moderate: 1.4, low: 1.1 };
-function terrainEta(lon, lat) {
+// 기존 데이터(열관성)만으로 본 지면 계수
+function terrainEtaPrior(lon, lat) {
   const s = sandRiskAt(lon, lat);
   return s ? SAND_ETA[s.risk] : 1.1;
+}
+
+// 탐사한 곳은 실제로 잰 지면 계수 (js/survey.js), 아니면 기존 데이터
+function terrainEta(lon, lat) {
+  const seen = typeof surveyEtaAt === "function" ? surveyEtaAt(lon, lat) : null;
+  return seen ?? terrainEtaPrior(lon, lat);
 }

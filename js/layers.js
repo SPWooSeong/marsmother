@@ -139,6 +139,9 @@ const IMAGE_LAYERS = {
   hirise_near: { render: () => renderDemCanvas("hirise_near"), bounds: DEM_DATA.near.bounds, alpha: 0.85 },
   ti_overlay: { ...SCIENCE_LAYER_META.tiOverlay, alpha: 0.6 },
   radiation: { render: renderRadiationCanvas, bounds: DEM_DATA.mola.bounds, alpha: 0.65 },
+  // 환경 필드 (js/environment.js) — 색의 투명도는 캔버스에 들어 있음
+  return_limit: { render: renderReturnCanvas, bounds: DEM_DATA.hirise.bounds, alpha: 1 },
+  comm_view: { render: renderCommCanvas, bounds: DEM_DATA.hirise.bounds, alpha: 1 },
 };
 
 // ---------- 고도(DEM) 레이어: 고도 격자를 브라우저에서 직접 칠함 ----------
@@ -539,6 +542,8 @@ function renderScienceLayers() {
     if (!layerDrawCache.has(def.id)) layerDrawCache.set(def.id, buildLayerItems(def));
     drawLayerItems(ctx, layerDrawCache.get(def.id), dpr);
   }
+  // 탐사 중 발견한 지형 변화 지점 (js/survey.js)
+  if (enabledLayers.has("survey_explored")) drawSurveyEvents(ctx, dpr);
   ctx.globalAlpha = 1;
 }
 
@@ -569,6 +574,7 @@ function setLayerVisible(id, on) {
   } else if (id === "hirise") {
     mapImage.style.visibility = on ? "" : "hidden";
   } else {
+    if (id === "survey_explored") setSurveyExploredVisible(on); // 컬러/흑백은 지도 사진 쪽에서 처리
     if (on) enabledLayers.add(id);
     else enabledLayers.delete(id);
     if (DEM_LAYER_SOURCES[id]) updateDemRange(true);
@@ -618,6 +624,119 @@ function renderRampLegend(li, colors, labels, noteText) {
   li.append(box);
 }
 
+// ---------- 환경 레이어 범례 (시각 · 기지 · 나의 정보에 따라 내용이 바뀜) ----------
+const ENV_LEGENDS = {
+  return_limit: () => {
+    const info = env.ret.info;
+    const items = RETURN_COLORS.map((c) => ({ color: `rgb(${c.rgb.join(",")})`, label: c.label }));
+    if (!info) return { items, note: "계산 중… (기준점에서 다녀오는 데 드는 산소 · 시간)" };
+    if (info.outside) return { items, note: "기준점이 Columbia Hills 지도 밖이에요." };
+    const b = info.budget;
+    const limiter = b.sunsetS < b.evaS ? `일몰까지 ${(b.sunsetS / 3600).toFixed(1)}시간` : `활동 시간 ${(b.evaS / 3600).toFixed(1)}시간`;
+    return {
+      items,
+      note:
+        `기준점: ${info.origin.isBase ? "기지 " : ""}${info.origin.name} · 왕복 가능 범위 약 ${info.reachKm2.toFixed(1)} km² (최대 ${(info.maxM / 1000).toFixed(1)} km). ` +
+        `예산: 산소 ${Math.round(profileUsableO2L())} L · ${limiter} (안전 여유 ${PROFILE.marginPct}% 제외` +
+        `${b.sun.isDay ? "" : ", 지금은 밤 — 일몰 제한 미적용"}). 나의 정보 · 시계를 바꾸면 다시 계산해요.`,
+    };
+  },
+  comm_view: () => ({
+    items: [
+      { color: "rgba(94,234,212,0.6)", label: "기지와 직선 통신 가능" },
+      { color: "#ff3caa", label: "통신 음영 (지형에 가림)" },
+    ],
+    note: env.comm.count
+      ? `기지 ${env.comm.count}곳 · 안테나 ${COMM_ANTENNA_M} m 기준 직선 가시 (지형 + 화성 곡률, 낮은 둔덕 ${COMM_CLEARANCE_M} m 는 회절로 통과)`
+      : "기지가 없어요. 포인트 탭 → 포인트 추가 → 종류 '기지' 로 추가하세요.",
+  }),
+};
+
+function renderEnvLegend(li, id) {
+  const box = document.createElement("div");
+  box.className = "layer-legend";
+  li.append(box);
+  const update = () => {
+    if (!layerInput(id)?.checked) return;
+    const { items, note } = ENV_LEGENDS[id]();
+    box.replaceChildren();
+    for (const it of items) {
+      const item = document.createElement("span");
+      item.className = "layer-legend__item";
+      const sw = document.createElement("span");
+      sw.className = "layer-legend__swatch";
+      sw.style.setProperty("--c", it.color);
+      item.append(sw, it.label);
+      box.append(item);
+    }
+    const p = document.createElement("span");
+    p.className = "layer-legend__note";
+    p.textContent = note;
+    box.append(p);
+  };
+  update();
+  for (const name of ["envreturnchange", "pointschange", "profilechange", "surveychange"]) document.addEventListener(name, update);
+  marsClock.onChange(() => setTimeout(update, 50));
+  layerInput(id).addEventListener("change", () => setTimeout(update, 80));
+}
+
+// ---------- 탐사 기록 범례 (요약 + 기록 초기화) ----------
+function renderSurveyLegend(li) {
+  const box = document.createElement("div");
+  box.className = "layer-legend survey-legend";
+  li.append(box);
+  const update = () => {
+    const sum = surveySummary();
+    box.replaceChildren();
+    const row = (label, value) => {
+      const item = document.createElement("span");
+      item.className = "survey-legend__stat";
+      const k = document.createElement("span");
+      k.textContent = label;
+      const v = document.createElement("strong");
+      v.textContent = value;
+      item.append(k, v);
+      box.append(item);
+    };
+    if (!sum) {
+      row("탐사 지형", "불러오는 중…");
+      return;
+    }
+    row("걸은 거리", sum.trackM >= 1000 ? `${(sum.trackM / 1000).toFixed(2)} km` : `${Math.round(sum.trackM)} m`);
+    row("밝힌 면적", `${Math.round(sum.areaM2).toLocaleString()} m²`);
+    row("평균 고도 차", `${sum.meanAbsDz.toFixed(2)} m`);
+    row("최대 고도 차", `${sum.maxAbsDz.toFixed(1)} m`);
+    for (const [type, info] of Object.entries(SURVEY_EVENT_TYPES)) {
+      const item = document.createElement("span");
+      item.className = "layer-legend__item";
+      const sw = document.createElement("span");
+      sw.className = "layer-legend__swatch is-diamond";
+      sw.style.setProperty("--c", info.color);
+      item.append(sw, `${info.label} ${sum.byType[type] || 0}`);
+      box.append(item);
+    }
+    const note = document.createElement("span");
+    note.className = "layer-legend__note";
+    note.textContent =
+      `컬러 = 직접 가 본 곳 (HUD 에서 걸어 다닌 길에서 ${SURVEY_RADIUS_M} m 안 · 지형 데이터는 밟은 30 m 칸 단위로 탐사 데이터로 갱신), 흑백 = 미탐험. ` +
+      `기존 DEM 이후 약 ${Math.round(sum.years)}년 변화 반영`;
+    box.append(note);
+    if (sum.walks) {
+      const reset = document.createElement("button");
+      reset.type = "button";
+      reset.className = "route-link survey-legend__reset";
+      reset.textContent = "탐사 기록 지우기";
+      reset.addEventListener("click", (e) => {
+        e.preventDefault();
+        resetSurveyWalks();
+      });
+      box.append(reset);
+    }
+  };
+  update();
+  document.addEventListener("surveychange", update);
+}
+
 const RAMP_LEGENDS = {
   ti_overlay: () => [
     SCIENCE_LAYER_META.tiLegend.colormap.map(([, c]) => c),
@@ -636,7 +755,8 @@ const RAMP_LEGENDS = {
 
 // 히트맵(지도 전체를 색으로 덮는) 레이어의 종류. 같은 종류끼리는 같이 켤 수 있고 (MOLA + HiRISE 고도는 색 기준이 같음),
 // 다른 종류를 켜면 먼저 켜져 있던 종류는 자동으로 꺼짐 — 무지개색 지도가 겹치면 읽을 수 없어서
-const HEATMAP_FAMILY = { mola_dem: "dem", hirise_dem: "dem", ti_overlay: "thermal", radiation: "radiation" };
+const HEATMAP_FAMILY = { mola_dem: "dem", hirise_dem: "dem", ti_overlay: "thermal", radiation: "radiation",
+  survey_explored: "survey", return_limit: "return" };
 
 const layerInput = (id) => layerListEl.querySelector(`input[data-layer="${id}"]`);
 
@@ -739,6 +859,8 @@ function initLayers() {
     const def = VECTOR_LAYERS.find((l) => l.id === id);
     if (def) renderLegend(li, def.legend, def.note);
     if (RAMP_LEGENDS[id]) renderRampLegend(li, ...RAMP_LEGENDS[id]());
+    if (id === "survey_explored") renderSurveyLegend(li);
+    if (ENV_LEGENDS[id]) renderEnvLegend(li, id);
     if (id in saved) input.checked = saved[id];
     input.addEventListener("change", () => {
       toggleLayer(id, input.checked);
