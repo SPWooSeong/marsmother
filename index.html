@@ -174,6 +174,15 @@
             <li><label>HiRISE DEM (고해상도) <span class="layer-tag">히트맵</span> <input type="checkbox" data-layer="hirise_dem" /></label></li>
             </ul>
           </section>
+          <section class="layer-group" data-group="survey" style="--pin-color: #3ddc97">
+            <div class="layer-group__title">
+              <button class="layer-group__fold" aria-expanded="true">탐사 기록</button>
+              <input type="checkbox" class="layer-group__toggle" aria-label="탐사 기록 전체 켜기/끄기" />
+            </div>
+            <ul class="layer-list">
+            <li><label>탐사된 구역 <span class="layer-tag">컬러/흑백</span> <input type="checkbox" data-layer="survey_explored" /></label></li>
+            </ul>
+          </section>
           <section class="layer-group" data-group="thermal" style="--pin-color: #22c3ee">
             <div class="layer-group__title">
               <button class="layer-group__fold" aria-expanded="true">열관성 · 지표 (MGS TES)</button>
@@ -206,6 +215,8 @@
             <ul class="layer-list">
             <li><label>모래 빠질 위험 있는 곳 <input type="checkbox" class="is-red" data-layer="ti_sand_trap" /></label></li>
             <li><label>방사선 위험 (추정) <span class="layer-tag">히트맵</span> <input type="checkbox" class="is-red" data-layer="radiation" /></label></li>
+            <li><label>귀환 한계 (산소 · 시간) <span class="layer-tag">히트맵</span> <input type="checkbox" class="is-red" data-layer="return_limit" /></label></li>
+            <li><label>통신 가시 범위 (기지) <input type="checkbox" data-layer="comm_view" /></label></li>
             </ul>
           </section>
         </div>
@@ -432,6 +443,7 @@
           종류
           <select name="type">
             <option value="custom">내 포인트</option>
+            <option value="base">기지 (통신 · 귀환 기준)</option>
             <option value="landmark">주요 지점</option>
             <option value="photo">사진 위치</option>
             <option value="cave">동굴</option>
@@ -449,6 +461,15 @@
     </dialog>
   </main>
 
+  <!-- 새로고침하면 처음 상태로: 추가한 포인트 · 숨긴 포인트 · 레이어 켬/끔 · 나의 정보 등 저장된 값을 모두 지움
+       (다른 스크립트가 읽기 전에 실행. 저장을 다시 살리려면 이 블록만 지우면 됨) -->
+  <script>
+    try {
+      for (const key of Object.keys(localStorage)) if (key.startsWith("marsmother.")) localStorage.removeItem(key);
+    } catch {
+      // 저장소를 쓸 수 없는 환경이면 지울 것도 없음
+    }
+  </script>
   <script src="js/data/spirit.js"></script>
   <script src="js/data/sites.js"></script>
   <script src="js/data/points.js"></script>
@@ -457,11 +478,15 @@
   <script src="js/data/hud_tiles.js"></script>
   <script src="js/dem.js"></script>
   <script src="js/eva.js"></script>
+  <script src="js/profile.js"></script>
   <script src="js/main.js"></script>
   <script src="js/marstime.js"></script>
+  <script src="js/survey.js"></script>
+  <script src="js/environment.js"></script>
   <script src="js/layers.js"></script>
   <script src="js/route.js"></script>
   <script src="js/hud.js"></script>
+  <script src="js/inspect.js"></script>
   <!-- 3D 지도: CesiumJS 는 3D 버튼을 처음 누를 때 불러옴 (인터넷 연결 필요) -->
   <script src="js/config.js"></script>
   <script src="js/globe.js"></script>

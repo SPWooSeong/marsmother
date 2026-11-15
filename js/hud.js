@@ -20,7 +20,7 @@ const EYE_HEIGHT_M = 1.7; // 눈높이
 const SCAN_RANGE_M = 45; // 스캔 거리
 const GRID_M = 1.6; // 스캔 격자 간격
 const COMPASS_SPAN_DEG = 150; // 방위 표시줄에 보이는 각도 범위
-const MINIMAP_ZOOM = 2.5;
+const MINIMAP_ZOOM = 10; // 지도 사진 1px(약 33 m) → 미니맵 10px (가로 약 700 m 가 보임)
 
 const HAZARD_COLORS = {
   safe: "76, 141, 255", // 파랑
@@ -73,6 +73,7 @@ function setHudMode(on) {
   hudCardTitle.textContent = on ? "2D 지도" : "HUD";
   hudPreview.setAttribute("aria-label", on ? "2D 지도로 돌아가기" : "HUD 모드로 전환");
   hudPreview.classList.toggle("is-minimap", on);
+  hudMiniCanvas.hidden = !on;
 
   if (on) {
     setHudVisible(true); // HUD 창이 꺼져 있었다면 켜기 (돌아갈 버튼이므로)
@@ -188,8 +189,10 @@ const SLOPE_DANGER_DEG = 15;
 const HAZARD_NAMES = { safe: "안전", caution: "주의", danger: "위험" };
 
 function hazardLevel(slopeDeg) {
-  if (slopeDeg < SLOPE_CAUTION_DEG) return "safe";
-  if (slopeDeg < SLOPE_DANGER_DEG) return "caution";
+  // 위험 기준은 나의 정보의 경사 한계, 주의는 그 절반 남짓
+  const danger = typeof PROFILE !== "undefined" ? PROFILE.slopeLimitDeg : SLOPE_DANGER_DEG;
+  if (slopeDeg < Math.min(SLOPE_CAUTION_DEG, danger * 0.55)) return "safe";
+  if (slopeDeg < danger) return "caution";
   return "danger";
 }
 
@@ -502,15 +505,114 @@ setInterval(() => {
 }, 1000);
 
 // ---------- 미니맵 (HUD 모드에서 왼쪽 아래 창) ----------
+// 흑백 지도 위에 우리가 걸어서 밝힌 곳만 컬러 (js/survey.js 의 탐사 구역) + 지금 고른 경로 (걸으면서 D* Lite 로 바뀌는 것이 보임)
+const hudMiniCanvas = document.createElement("canvas");
+hudMiniCanvas.className = "hud-mini";
+hudMiniCanvas.hidden = true;
+hudPreview.append(hudMiniCanvas);
+const MINI_MAP_FILTER = "sepia(0.55) saturate(1.7) hue-rotate(-12deg) brightness(1.05)"; // 지도 사진과 같은 화성 색
+
 function updateMinimap() {
   const here = getCurrentPosition();
   if (!here || !mapImage.naturalWidth) return;
-  const { x, y } = lonLatToImage(here.lon, here.lat);
-  const w = hudPreview.clientWidth;
-  const h = hudPreview.clientHeight;
-  hudPreview.style.backgroundImage = `url("${mapImage.getAttribute("src")}")`;
-  hudPreview.style.backgroundSize = `${mapImage.naturalWidth * MINIMAP_ZOOM}px auto`;
-  hudPreview.style.backgroundPosition = `${w / 2 - x * MINIMAP_ZOOM}px ${h / 2 - y * MINIMAP_ZOOM}px`;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = hudPreview.clientWidth, h = hudPreview.clientHeight;
+  if (hudMiniCanvas.width !== Math.round(w * dpr) || hudMiniCanvas.height !== Math.round(h * dpr)) {
+    hudMiniCanvas.width = Math.round(w * dpr);
+    hudMiniCanvas.height = Math.round(h * dpr);
+  }
+  const Z = MINIMAP_ZOOM;
+  const c = lonLatToImage(here.lon, here.lat);
+  const g = hudMiniCanvas.getContext("2d");
+  // 지도 사진 픽셀 → 미니맵 (내 위치가 가운데)
+  g.setTransform(dpr * Z, 0, 0, dpr * Z, dpr * (w / 2 - c.x * Z), dpr * (h / 2 - c.y * Z));
+  g.clearRect(c.x - w / Z, c.y - h / Z, (2 * w) / Z, (2 * h) / Z);
+  g.imageSmoothingEnabled = true;
+
+  // 1) 미탐험: 어두운 흑백
+  g.filter = "grayscale(1) brightness(0.5) contrast(1.1)";
+  g.drawImage(mapImage, 0, 0);
+  // 2) 밝힌 곳: 발자취를 따라 폭 2 × SURVEY_RADIUS_M 띠만 컬러 (따로 그려서 띠 모양으로 오려 냄) + 가장자리에 옅은 빛
+  if (survey.loaded) {
+    const m = (hudMiniCanvas.reveal = hudMiniCanvas.reveal || document.createElement("canvas"));
+    if (m.width !== hudMiniCanvas.width || m.height !== hudMiniCanvas.height) {
+      m.width = hudMiniCanvas.width;
+      m.height = hudMiniCanvas.height;
+    }
+    const mg = m.getContext("2d");
+    mg.setTransform(1, 0, 0, 1, 0, 0);
+    mg.globalCompositeOperation = "source-over";
+    mg.clearRect(0, 0, m.width, m.height);
+    mg.setTransform(g.getTransform());
+    mg.lineJoin = mg.lineCap = "round";
+    mg.lineWidth = Math.max(surveyBandPx(), 5 / Z); // 너무 가늘면 안 보이므로 미니맵에서는 최소 5px
+    mg.strokeStyle = "#fff";
+    for (const walk of survey.walks) {
+      mg.beginPath();
+      walk.forEach(([lon, lat], i) => {
+        const q = lonLatToImage(lon, lat);
+        if (i) mg.lineTo(q.x, q.y);
+        else mg.moveTo(q.x, q.y);
+      });
+      if (walk.length === 1) mg.lineTo(lonLatToImage(walk[0][0], walk[0][1]).x + 1e-3, lonLatToImage(walk[0][0], walk[0][1]).y);
+      mg.stroke();
+    }
+    mg.globalCompositeOperation = "source-in";
+    mg.filter = MINI_MAP_FILTER;
+    mg.drawImage(mapImage, 0, 0);
+    mg.filter = "none";
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.filter = `drop-shadow(0 0 ${2.5 * dpr}px rgba(255, 214, 150, 0.95))`;
+    g.drawImage(m, 0, 0);
+    g.restore();
+  }
+  g.filter = "none";
+
+  // 3) 고른 경로 (지금 위치부터 남은 길) + 도착지
+  const route = currentHudRoute();
+  if (route) {
+    g.beginPath();
+    route.path.forEach((p, i) => {
+      const q = lonLatToImage(p.lon, p.lat);
+      if (i) g.lineTo(q.x, q.y);
+      else g.moveTo(q.x, q.y);
+    });
+    g.lineJoin = g.lineCap = "round";
+    g.strokeStyle = "rgba(0, 0, 0, 0.75)";
+    g.lineWidth = 5 / Z;
+    g.stroke();
+    g.strokeStyle = route.color;
+    g.lineWidth = 2.6 / Z;
+    g.stroke();
+    const end = lonLatToImage(route.path[route.path.length - 1].lon, route.path[route.path.length - 1].lat);
+    g.beginPath();
+    g.arc(end.x, end.y, 4.5 / Z, 0, Math.PI * 2);
+    g.fillStyle = "#b38cff";
+    g.fill();
+    g.strokeStyle = "#fff";
+    g.lineWidth = 1.5 / Z;
+    g.stroke();
+  }
+  // 4) 걸으며 발견한 지형 변화 지점
+  if (survey.loaded) {
+    for (const e of survey.events) {
+      if (!e.found) continue;
+      const q = lonLatToImage(e.lon, e.lat);
+      const r = 4 / Z;
+      g.beginPath();
+      g.moveTo(q.x, q.y - r);
+      g.lineTo(q.x + r, q.y);
+      g.lineTo(q.x, q.y + r);
+      g.lineTo(q.x - r, q.y);
+      g.closePath();
+      g.fillStyle = SURVEY_EVENT_TYPES[e.type].color;
+      g.fill();
+      g.strokeStyle = "rgba(0, 0, 0, 0.8)";
+      g.lineWidth = 1 / Z;
+      g.stroke();
+    }
+  }
   hudPreview.style.setProperty("--heading", `${hud.heading}deg`);
 }
 
@@ -603,10 +705,19 @@ function updateMovement(dt) {
   updateEva(simDt, speed, grade, eta);
   // 뛰면 대사량이 더 큼 (걷기 대비 속도² 만큼 늘어나는 Pandolf 항이 이미 반영됨)
 
-  here.lat += (dirN * speed * simDt) / DEG_TO_M;
-  here.lon += (dirE * speed * simDt) / (DEG_TO_M * Math.cos((here.lat * Math.PI) / 180));
+  // 기지 건물은 뚫고 지나갈 수 없음: 막히면 벽을 따라 미끄러지고, 그것도 안 되면 멈춤
+  let mE = dirE * speed * simDt, mN = dirN * speed * simDt;
+  if (baseBlocksMove(e, n, mE, mN)) {
+    if (!baseBlocksMove(e, n, mE, 0)) mN = 0;
+    else if (!baseBlocksMove(e, n, 0, mN)) mE = 0;
+    else mE = mN = 0;
+  }
+  here.lat += mN / DEG_TO_M;
+  here.lon += mE / (DEG_TO_M * Math.cos((here.lat * Math.PI) / 180));
   hud.world = worldOf(here);
   hud.bob += simDt * speed * 2.4;
+  // 걸어 다닌 곳은 탐사된 구역이 되고, 지형이 지도와 다르면 고른 경로를 D* Lite 로 다시 계산 (js/route.js)
+  if (typeof onHudWalk === "function") onHudWalk(here);
 }
 
 // ---------- AR 경로 안내 ----------
@@ -996,6 +1107,7 @@ async function initTerrain3D() {
     scene.add(terrainMesh(near, 600, 600, photoMaterial(nearTex), { lift: -0.4 }));
 
     Object.assign(hud3d, { renderer, scene, camera, ready: true });
+    rebuildHudBases();
     hudTerrainCanvas.hidden = false;
     hudScene.hidden = true; // 파노라마 대신 실제 지형
     resizeTerrain3D();
@@ -1007,6 +1119,139 @@ async function initTerrain3D() {
     hudLoading.hidden = true;
   }
 }
+
+// ---------- 기지 건물 (포인트 종류 "기지") ----------
+// 돔형 거주동 + 원통 모듈 2개 + 에어록 + 온실 + 통신 마스트 + 태양광 패널 + 착륙 패드. 단위 m
+function buildBaseMesh() {
+  const T = THREE;
+  const mat = (color, extra) => new T.MeshLambertMaterial({ color, ...extra });
+  const hull = mat(0xe9e4dc);
+  const hullDark = mat(0xb9b2a8);
+  const metal = mat(0x6f7378);
+  const glow = new T.MeshBasicMaterial({ color: 0xffd98a });
+  const g = new T.Group();
+  const add = (geo, m, x, y, z, rot) => {
+    const mesh = new T.Mesh(geo, m);
+    mesh.position.set(x, y, z);
+    if (rot) mesh.rotation.set(rot[0] || 0, rot[1] || 0, rot[2] || 0);
+    g.add(mesh);
+    return mesh;
+  };
+
+  // 기초 (땅이 기울어도 뜨지 않게 아래로 깊이) + 착륙 패드
+  add(new T.CylinderGeometry(27, 29, 8, 40), mat(0x7a5a44), 0, -3.6, 0);
+  add(new T.CylinderGeometry(11, 11, 0.3, 32), mat(0x4a4744), 46, 0.3, 10);
+  add(new T.RingGeometry(7.5, 8.3, 32), new T.MeshBasicMaterial({ color: 0xf2f2f2, side: T.DoubleSide }), 46, 0.5, 10, [-Math.PI / 2]);
+
+  // 중앙 돔 거주동
+  add(new T.CylinderGeometry(9, 9, 2.4, 32), hullDark, 0, 1.6, 0);
+  add(new T.SphereGeometry(9, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), hull, 0, 2.8, 0);
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    add(new T.BoxGeometry(1.5, 0.9, 0.3), glow, Math.sin(a) * 8.6, 4.6, Math.cos(a) * 8.6, [0, a]); // 창문
+  }
+  add(new T.CylinderGeometry(1.6, 2.2, 1.2, 16), hullDark, 0, 12.1, 0); // 천장 해치
+
+  // 양옆 원통 모듈 (실험동 · 숙소) + 연결 통로
+  for (const side of [-1, 1]) {
+    const x = side * 19;
+    add(new T.CylinderGeometry(3.4, 3.4, 15, 24), hull, x, 3.6, 0, [Math.PI / 2]);
+    add(new T.SphereGeometry(3.4, 24, 12), hull, x, 3.6, 7.5);
+    add(new T.SphereGeometry(3.4, 24, 12), hull, x, 3.6, -7.5);
+    add(new T.CylinderGeometry(1.5, 1.5, 9, 16), hullDark, side * 12, 3, 0, [0, 0, Math.PI / 2]);
+    for (const z of [-4, 0, 4]) add(new T.BoxGeometry(0.3, 0.9, 1.6), glow, x + side * 3.3, 4.2, z);
+    for (const z of [-5, 5]) add(new T.BoxGeometry(5.5, 0.6, 0.8), metal, x, 0.5, z); // 받침
+  }
+
+  // 에어록 (남쪽 = +z) : 문 + 경사로
+  add(new T.BoxGeometry(4.2, 3.6, 6), hullDark, 0, 2.2, 11.5);
+  add(new T.BoxGeometry(2, 2.5, 0.2), mat(0x34373c), 0, 1.9, 14.55);
+  add(new T.BoxGeometry(2.6, 0.2, 4), metal, 0, 0.45, 16.4, [0.12]);
+  add(new T.BoxGeometry(0.5, 0.5, 0.25), new T.MeshBasicMaterial({ color: 0x59ff9c }), 1.5, 3.4, 14.6); // 상태등
+
+  // 온실 (반원통, 반투명 초록)
+  add(
+    new T.CylinderGeometry(4, 4, 13, 24, 1, false, 0, Math.PI),
+    mat(0x8fe3a2, { transparent: true, opacity: 0.55, side: T.DoubleSide }),
+    0, 0.7, -17, [0, 0, Math.PI / 2]
+  );
+  add(new T.BoxGeometry(13, 0.5, 8), mat(0x3d5a3a), 0, 0.6, -17);
+
+  // 통신 마스트 (높이 = 통신 가시성 계산의 안테나 높이) + 접시 + 경고등
+  const mastH = typeof COMM_ANTENNA_M === "number" ? COMM_ANTENNA_M : 12;
+  add(new T.CylinderGeometry(0.18, 0.3, mastH, 8), metal, -9, mastH / 2 + 0.8, -9);
+  add(new T.ConeGeometry(1.7, 0.9, 20, 1, true), mat(0xdddddd, { side: T.DoubleSide }), -9, mastH - 1, -8.2, [Math.PI / 2.6]);
+  const beacon = add(new T.SphereGeometry(0.35, 10, 8), new T.MeshBasicMaterial({ color: 0xff3b30 }), -9, mastH + 1.1, -9);
+  beacon.name = "beacon";
+
+  // 태양광 패널 3열
+  for (let k = 0; k < 3; k++) {
+    const z = -8 + k * 8;
+    add(new T.BoxGeometry(9, 0.15, 5), mat(0x1b2d5c), -36, 2.3, z, [0, 0, -0.45]);
+    add(new T.BoxGeometry(8.6, 0.05, 4.6), new T.MeshBasicMaterial({ color: 0x2f4f9e }), -36.03, 2.42, z, [0, 0, -0.45]);
+    add(new T.CylinderGeometry(0.12, 0.12, 2.4, 6), metal, -36, 1.1, z);
+  }
+  // 연료 · 물 탱크
+  for (const z of [-3, 3]) add(new T.SphereGeometry(2.2, 16, 12), mat(0xc9ccd1), 33, 2.4, z);
+  add(new T.BoxGeometry(6, 0.5, 11), metal, 33, 0.4, 0);
+  return g;
+}
+
+// 기지 건물의 충돌 범위 (buildBaseMesh 와 같은 좌표: x = 동쪽, z = 남쪽, 단위 m). 사람 몸 두께만큼 여유 0.6 m
+const BASE_PAD_M = 0.6;
+const BASE_SOLIDS = [
+  { circle: [0, 0, 9] }, // 중앙 돔
+  { box: [-22.4, -11, -15.6, 11] }, // 서쪽 모듈 (x0, z0, x1, z1)
+  { box: [15.6, -11, 22.4, 11] }, // 동쪽 모듈
+  { box: [-16.5, -1.5, 16.5, 1.5] }, // 연결 통로
+  { box: [-2.1, 8, 2.1, 14.6] }, // 에어록
+  { box: [-6.5, -21, 6.5, -13] }, // 온실
+  { box: [-40.5, -10.6, -31.5, 10.6] }, // 태양광 패널
+  { box: [30, -5.5, 36, 5.5] }, // 연료 · 물 탱크
+  { circle: [-9, -9, 0.4] }, // 통신 마스트
+];
+
+function insideBase(e, n) {
+  for (const p of typeof getBases === "function" ? getBases() : []) {
+    const b = worldOf(p);
+    const x = e - b.e, z = -(n - b.n);
+    if (Math.abs(x) > 45 || Math.abs(z) > 30) continue;
+    for (const s of BASE_SOLIDS) {
+      if (s.circle) {
+        if (Math.hypot(x - s.circle[0], z - s.circle[1]) < s.circle[2] + BASE_PAD_M) return true;
+      } else if (x > s.box[0] - BASE_PAD_M && x < s.box[2] + BASE_PAD_M && z > s.box[1] - BASE_PAD_M && z < s.box[3] + BASE_PAD_M) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// (e, n) 에서 (mE, mN) 만큼 움직이는 길이 건물에 막히는지. 빨리 움직여도 얇은 벽을 건너뛰지 않게 0.4 m 씩 확인
+// 이미 건물 안에 있으면 (기지를 내 발밑에 세운 경우) 빠져나올 수 있게 막지 않음
+function baseBlocksMove(e, n, mE, mN) {
+  if (insideBase(e, n)) return false;
+  const steps = Math.max(1, Math.ceil(Math.hypot(mE, mN) / 0.4));
+  for (let k = 1; k <= steps; k++) {
+    if (insideBase(e + (mE * k) / steps, n + (mN * k) / steps)) return true;
+  }
+  return false;
+}
+
+function rebuildHudBases() {
+  if (!hud3d.ready) return;
+  if (hud3d.bases) hud3d.scene.remove(hud3d.bases);
+  hud3d.bases = new THREE.Group();
+  for (const p of typeof getBases === "function" ? getBases() : []) {
+    const { e, n } = worldOf(p);
+    const mesh = buildBaseMesh();
+    mesh.position.set(e, sceneY(e, n), -n);
+    hud3d.bases.add(mesh);
+  }
+  hud3d.scene.add(hud3d.bases);
+}
+document.addEventListener("pointschange", rebuildHudBases);
+document.addEventListener("regionchange", rebuildHudBases);
 
 function resizeTerrain3D() {
   if (!hud3d.ready) return;
@@ -1140,6 +1385,11 @@ function resetHudTiles() {
 
 function renderTerrain3D() {
   updateHudTiles(performance.now());
+  // 기지 통신 마스트 경고등 깜빡임
+  if (hud3d.bases) {
+    const on = Math.floor(performance.now() / 600) % 2 === 0;
+    hud3d.bases.traverse((o) => o.name === "beacon" && (o.visible = on));
+  }
   updateTerrainCamera();
   hud3d.renderer.render(hud3d.scene, hud3d.camera);
 }

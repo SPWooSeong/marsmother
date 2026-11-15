@@ -72,7 +72,11 @@ function demSample(grid, lon, lat) {
 function demElevation(lon, lat) {
   for (const key of DEM_ORDER) {
     const grid = demGrids[key];
-    if (grid && demContains(grid, lon, lat)) return { m: demSample(grid, lon, lat), source: key };
+    if (grid && demContains(grid, lon, lat)) {
+      // 탐사한 곳은 기존 DEM 대신 탐사로 갱신된 고도 (js/survey.js)
+      const dz = typeof surveyDeltaAt === "function" ? surveyDeltaAt(lon, lat) : 0;
+      return { m: demSample(grid, lon, lat) + dz, source: key, surveyed: dz !== 0 };
+    }
   }
   return null;
 }

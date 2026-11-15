@@ -52,6 +52,8 @@ const POINT_TYPES = {
   landmark: { label: "주요 지점", color: "#ffd166" },
   photo: { label: "사진 위치", color: "#4cc9f0" },
   cave: { label: "동굴", color: "#c084fc" },
+  lost: { label: "로버 교신 두절", color: "#ff5a5a" }, // 로버를 잃어버린 지점
+  base: { label: "기지", color: "#5eead4" }, // 통신 가시성 · 안전 귀환 기준 (HUD 에 기지 건물로 보임)
   custom: { label: "내 포인트", color: "#ff7b54" },
 };
 
@@ -68,10 +70,11 @@ const REGION_POINTS = {
       note: `실제 주행 기록 · sol 1 ~ ${SPIRIT_TRAVERSE.lastSol} · 약 ${(SPIRIT_TRAVERSE.distanceM / 1000).toFixed(1)} km`,
       path: SPIRIT_TRAVERSE.path.map(([lon, lat]) => [lon, lat]),
     },
+    // Troy: Spirit 이 모래에 빠져 움직이지 못하다 교신이 끊긴 마지막 위치 → "로버 교신 두절" 포인트
     ...SPIRIT_TRAVERSE.landmarks.map((l) => ({
       id: l.id,
-      type: "landmark",
-      name: l.name,
+      type: l.id === "troy" ? "lost" : "landmark",
+      name: l.id === "troy" ? "Spirit 교신 두절 지점 (Troy)" : l.name,
       note: `${l.note} · 고도 ${Math.round(l.elevM)} m`,
       lon: l.lon,
       lat: l.lat,
