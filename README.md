@@ -29,6 +29,7 @@ Adds your own points on the map, such as a base, a cave or a custom marker, and 
 ## Profile
 Edits each crew member's personal limits and equipment, such as body weight, walking speed, slope limit, oxygen tank, EVA time and radiation limit. Routes, the HUD and the return-limit layer all update from these values.
 <img src="./src/profile.png">
+※ Please adjust the walking speed for the demonstration!!
 
 ## Localization
 Finds your exact position without GPS by matching the terrain around you against orbital imagery, following the Censible method from NASA JPL.
