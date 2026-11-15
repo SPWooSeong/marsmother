@@ -49,8 +49,7 @@ const REGION_CENTERS = {
 // 포인트 종류 (목록 그룹, 핀 색상)
 const POINT_TYPES = {
   route: { label: "로버 경로", color: "#7df9c4" },
-  landmark: { label: "주요 지점", color: "#ffd166" },
-  photo: { label: "사진 위치", color: "#4cc9f0" },
+  rover: { label: "Spirit Cam", color: "#ff9f1c" },
   cave: { label: "동굴", color: "#c084fc" },
   lost: { label: "로버 교신 두절", color: "#ff5a5a" }, // 로버를 잃어버린 지점
   base: { label: "기지", color: "#5eead4" }, // 통신 가시성 · 안전 귀환 기준 (HUD 에 기지 건물로 보임)
@@ -58,9 +57,21 @@ const POINT_TYPES = {
 };
 
 // Gusev 포인트: 모두 실제 데이터
-//  - Spirit 이동 경로 · 주요 지점: NASA 주행 기록 (js/data/spirit.js ← preprocess/build_traverse.py)
-//  - 지점을 누르면: DEM 으로 그린 그 자리의 360° 지형 시점 + 궤도 사진 3장 (js/data/sites.js ← preprocess/build_sites.py)
-//  - sol 36 Navcam: Spirit 이 실제로 찍은 사진을 위에서 내려다보게 이어 붙인 것 (위치 추정 기능과 같은 자료)
+//  - Spirit 이동 경로: NASA 주행 기록 (js/data/spirit.js ← preprocess/build_traverse.py)
+//  - Spirit Cam: Spirit 이 그 자리에서 실제로 찍은 Pancam · Navcam 파노라마
+//  (예전 '주요 지점' · '사진 위치' 포인트는 Spirit Cam 과 겹쳐서 뺐음. 데이터는 SPIRIT_TRAVERSE.landmarks 에 그대로 있음)
+
+// 로버 사진 핀에서 처음 보여줄 파노라마: 가장 가로로 긴 사진 (같으면 앞쪽 = Pancam)
+function widestPhotoIndex(photos) {
+  let best = 0;
+  photos.forEach((ph, i) => {
+    const b = photos[best];
+    const aspect = (p) => (p.src ? p.width / p.height : -1);
+    if (aspect(ph) > aspect(b)) best = i;
+  });
+  return best;
+}
+
 const REGION_POINTS = {
   gusev: [
     {
@@ -70,29 +81,30 @@ const REGION_POINTS = {
       note: `실제 주행 기록 · sol 1 ~ ${SPIRIT_TRAVERSE.lastSol} · 약 ${(SPIRIT_TRAVERSE.distanceM / 1000).toFixed(1)} km`,
       path: SPIRIT_TRAVERSE.path.map(([lon, lat]) => [lon, lat]),
     },
-    // Troy: Spirit 이 모래에 빠져 움직이지 못하다 교신이 끊긴 마지막 위치 → "로버 교신 두절" 포인트
-    ...SPIRIT_TRAVERSE.landmarks.map((l) => ({
-      id: l.id,
-      type: l.id === "troy" ? "lost" : "landmark",
-      name: l.id === "troy" ? "Spirit 교신 두절 지점 (Troy)" : l.name,
-      note: `${l.note} · 고도 ${Math.round(l.elevM)} m`,
-      lon: l.lon,
-      lat: l.lat,
-      sol: l.sol,
-      media: SITE_MEDIA[l.id] && { panorama: SITE_MEDIA[l.id].panorama, gallery: SITE_MEDIA[l.id].gallery },
+    // Spirit Cam 핀: Spirit 이 그 자리에서 실제로 찍은 Pancam · Navcam 사진 (NASA Photojournal)
+    //   js/data/rover_pins.js ← preprocess/build_rover_photos.py ← data/spirit/spirit_pin.json
+    ...ROVER_PINS.map((r) => ({
+      id: `rover-pin${r.id}`,
+      type: "rover",
+      name: r.name,
+      note: `sol ${r.startSol === r.endSol ? r.startSol : `${r.startSol}~${r.endSol}`} · ${r.photos.map((ph) => `${ph.camera} ${ph.id}`).join(" · ")} · 고도 ${Math.round(r.elevM)} m`,
+      lon: r.lon,
+      lat: r.lat,
+      sol: r.startSol,
+      media: { photos: r.photos, pano: widestPhotoIndex(r.photos) },
     })),
-    {
-      id: "photo-sol36",
-      type: "photo",
-      name: "Spirit Navcam (sol 36)",
-      note: "2004-02-09 Spirit 이 실제로 찍은 주변 사진 (위에서 내려다보게 이어 붙임, 약 80 m 범위)",
-      lon: 175.477951,
-      lat: -14.571504,
-      photo: "assets/localize/spirit-sol036-view.jpg",
-      media: {
-        panorama: SITE_MEDIA["spirit-landing"].panorama,
-        gallery: ["assets/localize/spirit-sol036-view.jpg", ...SITE_MEDIA["spirit-landing"].gallery],
-      },
-    },
+    // Troy: Spirit 이 모래에 빠져 움직이지 못하다 교신이 끊긴 마지막 위치 → "로버 교신 두절" 포인트
+    ...SPIRIT_TRAVERSE.landmarks
+      .filter((l) => l.id === "troy")
+      .map((l) => ({
+        id: l.id,
+        type: "lost",
+        name: "Spirit 교신 두절 지점 (Troy)",
+        note: `${l.note} · 고도 ${Math.round(l.elevM)} m`,
+        lon: l.lon,
+        lat: l.lat,
+        sol: l.sol,
+        media: SITE_MEDIA[l.id] && { panorama: SITE_MEDIA[l.id].panorama, gallery: SITE_MEDIA[l.id].gallery },
+      })),
   ],
 };
