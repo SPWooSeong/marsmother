@@ -309,9 +309,9 @@
         <button id="pv-close" class="photo-viewer__close" aria-label="닫기">×</button>
       </header>
 
-      <section class="pano">
+      <section id="pv-pano" class="pano">
         <div id="pano-view" class="pano__view" aria-label="360° 파노라마. 좌우로 드래그해서 방향 바꾸기">
-          <span class="pano__badge">360° · DEM 지형 시점 (사진 아님)</span>
+          <span id="pano-badge" class="pano__badge">360° · DEM 지형 시점 (사진 아님)</span>
           <span id="pano-heading" class="pano__heading"></span>
           <span class="pano__center" aria-hidden="true"></span>
           <span class="pano__hint">↔ 드래그하거나 슬라이더로 돌려보기</span>
@@ -432,8 +432,6 @@
           종류
           <select name="type">
             <option value="custom">내 포인트</option>
-            <option value="landmark">주요 지점</option>
-            <option value="photo">사진 위치</option>
             <option value="cave">동굴</option>
           </select>
         </label>
@@ -451,6 +449,7 @@
 
   <script src="js/data/spirit.js"></script>
   <script src="js/data/sites.js"></script>
+  <script src="js/data/rover_pins.js"></script>
   <script src="js/data/points.js"></script>
   <script src="js/data/layers.js"></script>
   <script src="js/data/terrain.js"></script>

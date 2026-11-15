@@ -1465,6 +1465,66 @@ button {
   transform: scale(1.05);
 }
 
+/* 로버 사진 (Pancam 은 컬러, 파노라마가 가로로 길어서 칸을 넓게) */
+.pano[hidden] {
+  display: none;
+}
+
+.gallery__grid--wide {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.gallery__cell {
+  margin: 0;
+  min-width: 0;
+}
+
+.gallery__grid--wide .gallery__item {
+  width: 100%;
+  aspect-ratio: 2 / 1;
+}
+
+/* 로버 사진 파노라마: 방위를 모르므로 N/E/S/W 표시 숨김 */
+.pano.is-photo .pano__heading,
+.pano.is-photo .pano__ticks,
+.pano.is-photo .pano__center {
+  visibility: hidden;
+}
+
+.pano.is-still .pano__play,
+.pano.is-still .pano__timeline,
+.pano.is-still .pano__hint {
+  visibility: hidden;
+}
+
+.gallery__item.is-active {
+  outline: 2px solid #ff9f1c;
+  outline-offset: 2px;
+}
+
+.gallery__item.is-color img,
+.lightbox.is-color img {
+  filter: none;
+}
+
+.gallery__item.is-missing {
+  color: rgba(244, 233, 225, 0.5);
+  font-size: 12px;
+  cursor: default;
+}
+
+.gallery__caption {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(244, 233, 225, 0.65);
+}
+
+.gallery__caption a {
+  color: #ff9f1c;
+}
+
 .lightbox {
   position: fixed;
   inset: 0;

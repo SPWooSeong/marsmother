@@ -313,7 +313,9 @@ const storageKey = (region) => `marsmother.points.${region}`;
 
 function loadCustomPoints(region) {
   try {
-    return JSON.parse(localStorage.getItem(storageKey(region))) || [];
+    const points = JSON.parse(localStorage.getItem(storageKey(region))) || [];
+    // 없어진 종류(예: 예전 '주요 지점')로 저장된 포인트는 '내 포인트'로
+    return points.map((p) => (POINT_TYPES[p.type] ? p : { ...p, type: "custom" }));
   } catch {
     return [];
   }
@@ -748,62 +750,165 @@ const pvLightbox = document.getElementById("pv-lightbox");
 const pvLightboxImg = document.getElementById("pv-lightbox-img");
 
 // heading: 화면 가운데가 바라보는 방향 (0~360°, 0 = 북쪽 = 파노라마 왼쪽 끝)
-const pano = { heading: 0, aspect: 5, raf: null, lastTime: 0 };
+// wrap: true = 좌우로 이어지는 360° 파노라마, false = 좌우 끝이 있는 사진 (끝까지만 움직임)
+// photo: true = 로버 사진 (방위를 모르므로 N/E/S/W 표시 안 함)
+const pano = { heading: 0, aspect: 5, raf: null, lastTime: 0, wrap: true, photo: false, dir: 1 };
 const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const AUTO_ROTATE_DEG_PER_SEC = 12; // 자동 회전 속도
+const PANO_WRAP_MIN_ASPECT = 3; // 로버 사진: 가로/세로가 이 이상이면 360° 처럼 이어서 돌림
 
-function openPhotoViewer(point) {
-  const { panorama, gallery } = point.media;
-  pvTitle.textContent = point.name;
-  pvNote.textContent = `${point.note ? point.note + " · " : ""}${formatLonLat(point)}`;
+const pvPano = document.getElementById("pv-pano");
+const panoBadge = document.getElementById("pano-badge");
+const PANO_DEM_BADGE = panoBadge.textContent;
 
-  // 위: 360° 파노라마
-  panoView.style.backgroundImage = `url("${panorama}")`;
+// 파노라마 이미지 바꾸기
+function setPanoImage(src, { aspect, wrap = true, photo = false, badge = PANO_DEM_BADGE } = {}) {
+  stopAutoRotate();
+  pano.wrap = wrap;
+  pano.photo = photo;
+  pano.dir = 1;
+  pvPano.classList.toggle("is-photo", photo);
+  panoBadge.textContent = badge;
+  panoView.style.backgroundImage = `url("${src}")`;
+  panoView.style.backgroundRepeat = wrap ? "repeat-x" : "no-repeat";
+  if (aspect) pano.aspect = aspect;
   const img = new Image();
   img.onload = () => {
     pano.aspect = img.naturalWidth / img.naturalHeight;
     setPanoHeading(pano.heading);
   };
-  img.src = panorama;
+  img.src = src;
+  setPanoHeading(wrap ? 0 : 180);
+}
+
+// 로버 사진 한 장을 파노라마로
+function showRoverPano(ph) {
+  const aspect = ph.width / ph.height;
+  setPanoImage(ph.src, {
+    aspect,
+    wrap: aspect >= PANO_WRAP_MIN_ASPECT,
+    photo: true,
+    badge: `${ph.camera} 사진 · ${ph.id} · sol ${ph.sol}`,
+  });
+  for (const el of pvGallery.querySelectorAll(".gallery__item")) {
+    el.classList.toggle("is-active", el.dataset.src === ph.src);
+  }
+}
+
+// media 형식 두 가지
+//  - { panorama, gallery: [src] }  : DEM 지형 시점 + 궤도 사진 (사진 위치 포인트)
+//  - { photos: [{ camera, id, sol, src, thumb, color, width, height, page, note }], pano } :
+//      로버가 실제로 찍은 사진 (로버 사진 핀). 위 = photos[pano] 를 파노라마로, 아래 썸네일을 누르면 바꿔 보기
+function openPhotoViewer(point) {
+  const { panorama, gallery = [], photos } = point.media;
+  pvTitle.textContent = point.name;
+  pvNote.textContent = `${point.note ? point.note + " · " : ""}${formatLonLat(point)}`;
 
   // 아래: 그 외 사진
-  pvGalleryTitle.textContent = `궤도 사진 · 가시광 모자이크 0.25 m/px (${gallery.length})`;
+  const items = photos
+    ? photos.map((ph) => ({
+        src: ph.src,
+        thumb: ph.thumb,
+        color: ph.color,
+        caption: `${ph.camera} · ${ph.id} · sol ${ph.sol}${ph.note ? ` · ${ph.note}` : ""}`,
+        page: ph.page,
+        onClick: () => showRoverPano(ph),
+      }))
+    : gallery.map((src) => ({ src, thumb: src }));
+  pvGalleryTitle.textContent = photos
+    ? `Spirit Cam · Pancam / Navcam · NASA Photojournal (${items.filter((it) => it.src).length})`
+    : `궤도 사진 · 가시광 모자이크 0.25 m/px (${items.length})`;
+  pvGallery.classList.toggle("gallery__grid--wide", !!photos);
   pvGallery.replaceChildren(
-    ...gallery.map((src, i) => {
+    ...items.map((it, i) => {
+      const fig = document.createElement("figure");
+      fig.className = "gallery__cell";
       const btn = document.createElement("button");
       btn.className = "gallery__item";
-      btn.setAttribute("aria-label", `사진 ${i + 1} 크게 보기`);
-      const thumb = document.createElement("img");
-      thumb.src = src;
-      thumb.alt = "";
-      thumb.loading = "lazy";
-      btn.append(thumb);
-      btn.addEventListener("click", () => {
-        pvLightboxImg.src = src;
-        pvLightbox.hidden = false;
-      });
-      return btn;
+      btn.classList.toggle("is-color", !!it.color);
+      if (it.src) {
+        btn.dataset.src = it.src;
+        btn.setAttribute("aria-label", it.onClick ? `사진 ${i + 1} 파노라마로 보기` : `사진 ${i + 1} 크게 보기`);
+        const thumb = document.createElement("img");
+        thumb.src = it.thumb;
+        thumb.alt = it.caption || "";
+        thumb.loading = "lazy";
+        btn.append(thumb);
+        btn.addEventListener("click", () => {
+          if (it.onClick) return it.onClick();
+          pvLightboxImg.src = it.src;
+          pvLightbox.classList.toggle("is-color", !!it.color);
+          pvLightbox.hidden = false;
+        });
+      } else {
+        // 원본 JPEG 가 없는 사진: 출처 페이지만 연결
+        btn.disabled = true;
+        btn.classList.add("is-missing");
+        btn.textContent = "사진 파일 없음";
+      }
+      fig.append(btn);
+      if (it.caption) {
+        const cap = document.createElement("figcaption");
+        cap.className = "gallery__caption";
+        cap.append(it.caption + " ");
+        if (it.page) {
+          const a = document.createElement("a");
+          a.href = it.page;
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.textContent = "출처 ↗";
+          cap.append(a);
+        }
+        fig.append(cap);
+      }
+      return fig;
     })
   );
   pvLightbox.hidden = true;
 
   photoViewer.showModal();
-  setPanoHeading(0);
+
+  // 위: 파노라마 (dialog 가 열린 뒤에 크기를 재야 해서 showModal 다음)
+  if (photos) {
+    const first = photos[point.media.pano ?? 0];
+    if (first?.src) showRoverPano(first);
+  } else {
+    setPanoImage(panorama);
+  }
 }
 
-// 방향(°)에 맞춰 파노라마 위치를 옮김. 이미지가 좌우로 반복되므로 360° 이어짐
+// 방향(°)에 맞춰 파노라마 위치를 옮김
+//  - wrap  : 이미지가 좌우로 반복되므로 360° 이어짐
+//  - !wrap : 0 = 사진 왼쪽 끝, 360 = 오른쪽 끝 (화면보다 좁은 사진은 가운데 고정)
 function setPanoHeading(deg) {
-  pano.heading = ((deg % 360) + 360) % 360;
+  pano.heading = pano.wrap ? ((deg % 360) + 360) % 360 : Math.min(360, Math.max(0, deg));
 
   const fullW = panoView.clientHeight * pano.aspect; // 화면에 그려진 파노라마 한 바퀴 폭
   if (fullW) {
-    const offset = (pano.heading / 360) * fullW - panoView.clientWidth / 2;
-    panoView.style.backgroundPosition = `${-offset}px 0`;
+    if (pano.wrap) {
+      const offset = (pano.heading / 360) * fullW - panoView.clientWidth / 2;
+      panoView.style.backgroundPosition = `${-offset}px 0`;
+    } else {
+      const extra = fullW - panoView.clientWidth;
+      const x = extra > 0 ? -(pano.heading / 360) * extra : -extra / 2;
+      panoView.style.backgroundPosition = `${x}px 0`;
+    }
+    // 화면보다 좁은 사진은 움직일 수 없으므로 회전 조작 숨김
+    const still = !pano.wrap && fullW <= panoView.clientWidth;
+    if (still && pano.raf) stopAutoRotate();
+    pvPano.classList.toggle("is-still", still);
   }
 
   const rounded = Math.round(pano.heading) % 360;
   panoSlider.value = String(Math.round(pano.heading));
   panoHeading.textContent = `${COMPASS[Math.round(rounded / 45) % 8]} ${rounded}°`;
+}
+
+// 드래그 1 px 이 몇 도인지: 360° 는 한 바퀴 폭, 끝이 있는 사진은 화면 밖으로 남는 폭 기준
+function panoDegPerPx() {
+  const fullW = panoView.clientHeight * pano.aspect;
+  const span = pano.wrap ? fullW : fullW - panoView.clientWidth;
+  return span > 0 ? 360 / span : 0;
 }
 
 // 드래그: 손가락/마우스를 움직인 만큼 회전 (한 바퀴 폭 = 360°)
@@ -816,8 +921,7 @@ panoView.addEventListener("pointerdown", (e) => {
 });
 panoView.addEventListener("pointermove", (e) => {
   if (!panoDrag) return;
-  const fullW = panoView.clientHeight * pano.aspect;
-  setPanoHeading(panoDrag.heading - ((e.clientX - panoDrag.x) / fullW) * 360);
+  setPanoHeading(panoDrag.heading - (e.clientX - panoDrag.x) * panoDegPerPx());
 });
 function endPanoDrag() {
   panoDrag = null;
@@ -843,7 +947,9 @@ panoView.addEventListener("keydown", (e) => {
 function autoRotateFrame(time) {
   const dt = pano.lastTime ? (time - pano.lastTime) / 1000 : 0;
   pano.lastTime = time;
-  setPanoHeading(pano.heading + dt * AUTO_ROTATE_DEG_PER_SEC);
+  setPanoHeading(pano.heading + dt * AUTO_ROTATE_DEG_PER_SEC * pano.dir);
+  // 끝이 있는 사진: 끝에 닿으면 반대로
+  if (!pano.wrap && (pano.heading >= 360 || pano.heading <= 0)) pano.dir = pano.heading >= 360 ? -1 : 1;
   pano.raf = requestAnimationFrame(autoRotateFrame);
 }
 
