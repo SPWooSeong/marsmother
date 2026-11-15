@@ -700,6 +700,30 @@ function getBases() {
   return getPoints().filter((p) => p.type === "base" && p.lon != null && p.lat != null);
 }
 
+// 내 위치 근처(북동쪽 약 250 m)에 기지를 하나 세움 — 사용법 안내의 "기지 설치" 단계에서 씀 (js/tutorial.js)
+//  이미 기지가 있으면 새로 만들지 않고 그 기지를 돌려줌. 기지는 저장하지 않으므로 새로고침하면 사라짐
+function addBaseNearMe() {
+  const existing = getBases()[0];
+  if (existing) return existing;
+  const here = getCurrentPosition();
+  if (!here) return null;
+  const M_PER_DEG = 59274.7; // 화성 위도 1° (반지름 3,396.19 km)
+  const point = {
+    id: `user-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    type: "base",
+    name: "기지 1",
+    note: "",
+    lon: here.lon + 180 / (M_PER_DEG * Math.cos((here.lat * Math.PI) / 180)),
+    lat: here.lat + 180 / M_PER_DEG,
+    custom: true,
+  };
+  saveCustomPoints(currentRegion, [...loadCustomPoints(currentRegion), point]);
+  renderPointList();
+  renderMapOverlays();
+  document.dispatchEvent(new CustomEvent("pointschange"));
+  return point;
+}
+
 // 지도에서 위치 하나 고르기 (포인트 추가, 길찾기 출발/도착지 등에서 공용)
 // onPick(lonLat): 클릭한 위치, onCancel(): Esc로 취소했을 때
 let mapPick = null;

@@ -29,6 +29,8 @@ const EVA = {
   dailyEnergyKj: 8 * 3600 * 0.3, // 피로도 기준: 8시간 동안 평균 300 W
 };
 
+const EVA_PANDOLF_MAX_MPS = 2.0; // Pandolf 식을 그대로 쓰는 최대 속도 (빠른 걸음 7.2 km/h)
+
 // 경사 tan(θ) (오르막 +) → 걷는 속도 (m/s)
 function evaSpeed(grade, eta = 1.1) {
   const tobler = Math.exp(-3.5 * Math.abs(grade + 0.05)) / Math.exp(-3.5 * 0.05); // 평지 = 1, 약한 내리막에서 최대
@@ -42,7 +44,10 @@ function evaMetabolicW(speed, grade, eta = 1.1) {
   const base = 1.5 * W + EVA.gRatio * 2 * (W + L) * (L / W) ** 2;
   if (speed <= 0) return base;
   const G = grade * 100;
-  const level = EVA.gRatio * eta * (W + L) * 1.5 * speed * speed;
+  // Pandolf 식은 걷는 속도에서만 맞음 (속도² 에 비례 → 시연용으로 속도를 크게 올리면 2분에 1,500 kcal 처럼 터짐).
+  // 걷기 한계(2 m/s)보다 빠르면 "1 m 가는 데 드는 에너지" 를 그 한계에서의 값으로 고정
+  const vWalk = Math.min(speed, EVA_PANDOLF_MAX_MPS);
+  const level = EVA.gRatio * eta * (W + L) * 1.5 * vWalk * speed;
   if (G >= 0) return base + level + EVA.gRatio * eta * (W + L) * 0.35 * speed * G;
   return base + level * Math.max(0.55, 1 + G / 25); // 내리막: 완만하면 덜 듦 (근사)
 }

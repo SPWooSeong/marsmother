@@ -133,7 +133,7 @@ function addPin(lon, lat, text, color, { big = false, alwaysLabel = false } = {}
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     label: {
-      text,
+      text: typeof i18nText === "function" ? i18nText(text) : text, // 영어 모드면 영어로 (js/i18n.js)
       font: `${big ? "bold 14px" : "600 12px"} sans-serif`,
       fillColor: Cesium.Color.WHITE,
       outlineColor: Cesium.Color.BLACK,
@@ -188,7 +188,7 @@ function buildOverlays() {
     viewer.entities.add({
       position: deg(center.lon, center.lat, 15000),
       label: {
-        text: region ? region.name : "",
+        text: region ? (typeof i18nText === "function" ? i18nText(region.name) : region.name) : "",
         font: "bold 16px sans-serif",
         fillColor: cssColor("#7df9c4"),
         outlineColor: Cesium.Color.BLACK,
@@ -220,6 +220,11 @@ function buildOverlays() {
   const here = getCurrentPosition();
   if (here) addPin(here.lon, here.lat, "현위치", "#4cc9f0", { big: true });
 }
+
+// 언어를 바꾸면 3D 위의 이름표도 다시 그림
+document.addEventListener("languagechange", () => {
+  if (viewer && document.body.classList.contains("is-3d")) buildOverlays();
+});
 
 // ---------- 2D ↔ 3D 전환 ----------
 async function enter3D() {

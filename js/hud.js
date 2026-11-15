@@ -634,7 +634,7 @@ function buildVitals() {
     .map(
       (v) => `
       <div class="hud-ring ${v.big ? "is-big" : ""}" data-id="${v.id}" title="${v.label} ${v.value}%">
-        ${ringSvg(v, v.big ? 44 : 22, v.big ? 7 : 5)}
+        ${ringSvg(v, v.big ? 47 : 27, v.big ? 8 : 5)}
         <div class="hud-ring__text">
           <span class="hud-ring__label">${v.label}</span>
           <span class="hud-ring__num">${v.num ?? Math.round(v.value)}</span>
@@ -1203,6 +1203,24 @@ function sceneY(e, n, h = terrainHeight(e, n)) {
 }
 
 // 아래 가운데 지형 정보 캡슐: 고도 · 발밑 경사 · 모래 빠짐 위험 · 데이터 출처
+// 기지와의 통신 상태: 기지 안테나에서 지금 서 있는 곳이 직선으로 보이는지 (js/environment.js envCommMap, 지형 + 화성 곡률)
+//  연결 = 가까운 기지까지 거리와 함께 · 음영 = 지형에 가려 끊김 · 기지 없음 = 아직 기지를 세우지 않음
+function baseCommItem(here, item) {
+  if (!here || typeof getBases !== "function") return "";
+  const bases = getBases();
+  if (!bases.length) return item("기지 통신", "기지 없음", `<i class="hud-terrain__dot is-off"></i>`);
+  const nearest = Math.min(...bases.map((b) => distanceM(here, b)));
+  let linked = false;
+  if (typeof survey !== "undefined" && survey.loaded && typeof envCommMap === "function") {
+    const vis = envCommMap();
+    const cell = envCellOf(here);
+    linked = !!(vis && cell !== -1 && vis[cell]);
+  }
+  return linked
+    ? item("기지 통신", `연결 · ${formatKm(nearest)}`, `<i class="hud-terrain__dot"></i>`)
+    : item("기지 통신", "음영", `<i class="hud-terrain__dot is-high"></i>`);
+}
+
 let terrainStatusT = 0;
 function updateTerrainStatus(now) {
   if (now - terrainStatusT < 250) return;
@@ -1221,6 +1239,7 @@ function updateTerrainStatus(now) {
     item("고도", formatElevation(terrainHeight(e, n))) +
     item("발밑 경사", `${slopeAt(e, n).toFixed(1)}°`) +
     (sand ? item("모래 빠짐", sand.name, `<i class="hud-terrain__dot is-${sand.risk}"></i>`) : "") +
+    baseCommItem(here, item) +
     `<span class="hud-terrain__src">${DEM_LABELS[g.key]}</span>`;
 }
 
@@ -1276,16 +1295,172 @@ function marsSky() {
   const c = document.createElement("canvas");
   c.width = 2;
   c.height = 256;
-  const g = c.getContext("2d");
-  const grad = g.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, "#5b4636");
-  grad.addColorStop(0.55, "#b98d68");
-  grad.addColorStop(1, "#e2bf98");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 2, 256);
   const t = new THREE.CanvasTexture(c);
   t.encoding = THREE.sRGBEncoding;
+  paintSky(t, SKY_DAY);
   return t;
+}
+
+// ---------- 생생함: 화성 시각에 맞는 해 · 하늘 · 별 · 떠다니는 먼지 ----------
+// 하늘 색 [위, 가운데, 지평선] + 안개 색. 낮 = 버터스카치, 해 질 녘 = 푸르스름한 회색 (화성 노을은 파란색), 밤 = 거의 검정
+const SKY_DAY = { top: [91, 70, 54], mid: [185, 141, 104], low: [226, 191, 152], fog: [207, 164, 124] };
+const SKY_DUSK = { top: [38, 40, 58], mid: [96, 96, 112], low: [150, 158, 176], fog: [120, 118, 126] };
+const SKY_NIGHT = { top: [3, 4, 8], mid: [8, 9, 15], low: [20, 17, 16], fog: [14, 12, 12] };
+
+function mixRgb(a, b, t) {
+  return a.map((v, i) => v + (b[i] - v) * t);
+}
+function mixSky(a, b, t) {
+  return { top: mixRgb(a.top, b.top, t), mid: mixRgb(a.mid, b.mid, t), low: mixRgb(a.low, b.low, t), fog: mixRgb(a.fog, b.fog, t) };
+}
+const cssRgb = (c) => `rgb(${c.map(Math.round).join(",")})`;
+const smooth01 = (x) => {
+  const t = Math.max(0, Math.min(1, x));
+  return t * t * (3 - 2 * t);
+};
+
+function paintSky(texture, sky) {
+  const g = texture.image.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, cssRgb(sky.top));
+  grad.addColorStop(0.55, cssRgb(sky.mid));
+  grad.addColorStop(1, cssRgb(sky.low));
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 2, 256);
+  texture.needsUpdate = true;
+}
+
+// 가운데가 밝고 가장자리로 사라지는 둥근 점 (해 · 먼지 알갱이)
+function glowTexture(stops) {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  for (const [at, color] of stops) grad.addColorStop(at, color);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+const DUST_COUNT = 420;
+const DUST_BOX_M = 36; // 나를 중심으로 이 크기 상자 안에서만 떠다님 (벗어나면 반대편으로)
+const DUST_TOP_M = 7;
+
+function buildAtmosphere(scene, ambient, sun) {
+  // 해: 작은 원반 + 넓은 빛무리
+  const sunSprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: glowTexture([[0, "rgba(255,255,255,1)"], [0.06, "rgba(255,255,255,1)"], [0.1, "rgba(255,255,255,0.45)"], [0.35, "rgba(255,255,255,0.12)"], [1, "rgba(255,255,255,0)"]]),
+      fog: false,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+  sunSprite.scale.set(52000, 52000, 1);
+  sunSprite.renderOrder = -1;
+  scene.add(sunSprite);
+
+  // 별: 밤에만 보임
+  const starPos = new Float32Array(700 * 3);
+  for (let i = 0; i < 700; i++) {
+    const az = Math.random() * Math.PI * 2;
+    const el = Math.asin(Math.random()); // 지평선 위 반구
+    starPos.set([Math.cos(el) * Math.sin(az) * 300000, Math.sin(el) * 300000 + 1500, Math.cos(el) * Math.cos(az) * 300000], i * 3);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0, depthWrite: false }));
+  stars.frustumCulled = false;
+  scene.add(stars);
+
+  // 먼지: 바람에 실려 흘러가는 작은 알갱이
+  const dustPos = new Float32Array(DUST_COUNT * 3);
+  for (let i = 0; i < DUST_COUNT; i++) {
+    dustPos.set([(Math.random() - 0.5) * DUST_BOX_M, Math.random() * DUST_TOP_M, (Math.random() - 0.5) * DUST_BOX_M], i * 3);
+  }
+  const dustGeo = new THREE.BufferGeometry();
+  dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+  const dust = new THREE.Points(
+    dustGeo,
+    new THREE.PointsMaterial({
+      map: glowTexture([[0, "rgba(255,255,255,1)"], [0.4, "rgba(255,255,255,0.5)"], [1, "rgba(255,255,255,0)"]]),
+      color: 0xf6d9b8,
+      size: 0.12,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    })
+  );
+  dust.frustumCulled = false;
+  scene.add(dust);
+
+  hud3d.atmo = { ambient, sun, sunSprite, stars, dust, checkT: 0, key: "", lastT: 0 };
+}
+
+// 화성 시각(시계)의 태양 위치로 해 방향 · 빛 · 하늘 색을 맞춤. 시계를 돌리면 HUD 도 같이 바뀜
+function updateAtmosphere(now) {
+  const A = hud3d.atmo;
+  if (!A) return;
+  const cam = hud3d.camera;
+
+  if (now - A.checkT > 500) {
+    A.checkT = now;
+    const here = getCurrentPosition();
+    const sp = here ? sunPosition(marsClock.now(), here.lon, here.lat) : { elevationDeg: 45, azimuthDeg: 120 };
+    const key = `${sp.elevationDeg.toFixed(1)}|${sp.azimuthDeg.toFixed(1)}`;
+    if (key !== A.key) {
+      A.key = key;
+      const el = (sp.elevationDeg * Math.PI) / 180;
+      const az = (sp.azimuthDeg * Math.PI) / 180;
+      A.dir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)); // 동 x · 위 y · 북 −z
+      const day = smooth01((sp.elevationDeg + 5) / 17); // −5° 아래 = 밤, 12° 위 = 한낮
+      const dusk = Math.max(0, 1 - Math.abs(sp.elevationDeg - 2) / 11); // 해가 지평선 근처일 때
+      const sky = mixSky(mixSky(SKY_NIGHT, SKY_DAY, day), SKY_DUSK, dusk * 0.75);
+      paintSky(hud3d.scene.background, sky);
+      hud3d.scene.fog.color.setRGB(sky.fog[0] / 255, sky.fog[1] / 255, sky.fog[2] / 255).convertSRGBToLinear();
+      // 빛: 낮에는 따뜻한 햇빛, 해가 낮으면 붉고 약하게, 밤에는 푸른 어스름만
+      A.sun.position.copy(A.dir.y > 0.08 ? A.dir : new THREE.Vector3(A.dir.x, 0.08, A.dir.z)).normalize();
+      A.sun.intensity = 0.8 * day; // 해가 높아도 땅이 하얗게 날아가지 않을 만큼만
+      A.sun.color.setRGB(1, 0.94 - 0.2 * dusk, 0.86 - 0.36 * dusk);
+      A.ambient.intensity = 0.2 + 0.25 * day;
+      A.ambient.color.setRGB(0.72 + 0.28 * day, 0.78 + 0.22 * day, 1);
+      // 해: 낮 = 흰 노랑, 노을 = 푸른 흰색 (화성 대기 먼지가 푸른 빛을 앞으로 산란)
+      A.sunSprite.visible = sp.elevationDeg > -3;
+      A.sunSprite.material.color.setRGB(1 - 0.35 * dusk, 0.95 - 0.12 * dusk, 0.84 + 0.16 * dusk);
+      A.sunSprite.material.opacity = 0.35 + 0.65 * smooth01((sp.elevationDeg + 3) / 8);
+      A.stars.material.opacity = 0.9 * (1 - day);
+      A.dust.material.opacity = 0.14 + 0.42 * day;
+    }
+  }
+  if (A.dir) A.sunSprite.position.copy(cam.position).addScaledVector(A.dir, 250000);
+  A.stars.position.set(cam.position.x, cam.position.y - 1500, cam.position.z);
+
+  // 먼지: 바람(서 → 동, 약 1.3 m/s) + 살짝 일렁임. 나를 따라오는 상자 안에서 돌고 돎
+  const dt = Math.min(0.1, A.lastT ? (now - A.lastT) / 1000 : 0);
+  A.lastT = now;
+  const pos = A.dust.geometry.attributes.position;
+  const arr = pos.array;
+  const half = DUST_BOX_M / 2;
+  const t = now / 1000;
+  for (let i = 0; i < DUST_COUNT; i++) {
+    const j = i * 3;
+    arr[j] += (1.3 + 0.5 * Math.sin(t * 0.7 + i)) * dt;
+    arr[j + 1] += 0.12 * Math.sin(t * 1.1 + i * 1.7) * dt;
+    arr[j + 2] += 0.35 * Math.cos(t * 0.5 + i * 0.9) * dt;
+    // 상자 밖으로 나가면 반대편에서 다시 (내가 걸어가도 항상 주변에 있게)
+    let dx = arr[j] - cam.position.x;
+    let dz = arr[j + 2] - cam.position.z;
+    if (dx > half) arr[j] -= DUST_BOX_M;
+    else if (dx < -half) arr[j] += DUST_BOX_M;
+    if (dz > half) arr[j + 2] -= DUST_BOX_M;
+    else if (dz < -half) arr[j + 2] += DUST_BOX_M;
+    const ground = cam.position.y - EYE_HEIGHT_M;
+    if (arr[j + 1] < ground + 0.1) arr[j + 1] = ground + DUST_TOP_M - 0.2;
+    else if (arr[j + 1] > ground + DUST_TOP_M) arr[j + 1] = ground + 0.2;
+  }
+  pos.needsUpdate = true;
 }
 
 async function initTerrain3D() {
@@ -1313,10 +1488,12 @@ async function initTerrain3D() {
     const camera = new THREE.PerspectiveCamera(60, 1, 0.3, 400000);
     camera.rotation.order = "YXZ";
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-    const sun = new THREE.DirectionalLight(0xfff0dc, 1.05); // 낮은 태양 → 크레이터 음영
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xfff0dc, 1.05); // 방향 · 세기는 화성 시각에 맞춰 updateAtmosphere 가 정함
     sun.position.set(-0.6, 0.55, 0.45).normalize();
     scene.add(sun);
+    buildAtmosphere(scene, ambient, sun);
 
     const loader = new THREE.TextureLoader();
     const [nearTex, farTex] = await Promise.all([
@@ -1490,10 +1667,14 @@ window.addEventListener("resize", () => hud.on && resizeTerrain3D());
 function updateTerrainCamera() {
   const cam = hud3d.camera;
   const { e, n } = hud.world;
-  const bob = hud.moving ? Math.sin(hud.bob) * 0.05 : 0;
+  // 걸음: 위아래 출렁임 + 좌우로 살짝 기우뚱. 멈추면 서서히 가라앉고, 서 있을 때는 숨 쉬는 정도로만 움직임
+  hud.walkAmp = (hud.walkAmp || 0) + ((hud.moving ? 1 : 0) - (hud.walkAmp || 0)) * 0.12;
+  const breath = Math.sin(performance.now() / 1900) * 0.006;
+  const bob = Math.sin(hud.bob) * 0.06 * hud.walkAmp + breath;
   cam.position.set(e, sceneY(e, n) + EYE_HEIGHT_M + bob, -n);
   cam.rotation.y = (-hud.heading * Math.PI) / 180; // 0° = 북쪽(-z), 시계 방향으로 회전
   cam.rotation.x = (hud.pitch * Math.PI) / 180; // 고개 들기/숙이기
+  cam.rotation.z = Math.sin(hud.bob / 2) * 0.007 * hud.walkAmp; // 한 걸음마다 좌 · 우
   cam.updateMatrixWorld();
   cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
 }
@@ -1614,6 +1795,7 @@ function renderTerrain3D() {
     hud3d.bases.traverse((o) => o.name === "beacon" && (o.visible = on));
   }
   updateTerrainCamera();
+  updateAtmosphere(performance.now());
   hud3d.renderer.render(hud3d.scene, hud3d.camera);
 }
 

@@ -1077,34 +1077,56 @@ function renderResults() {
 
     const stats = document.createElement("dl");
     stats.className = "route-card__stats";
-    const rows = [
-      ["소모 에너지", `${r.kcal.toLocaleString()} kcal`],
+    const arrivalText = `${formatClock(marsTime(r.arrival, r.path[r.path.length - 1].lon).ltst)}${r.sunsetMarginS == null ? " (밤)" : r.sunsetMarginS >= 0 ? ` · 일몰 ${formatDuration(r.sunsetMarginS / 3600)} 전` : " · 일몰 후"}`;
+    // 늘 보이는 핵심 6개 + "자세히" 를 눌러야 보이는 나머지
+    const mainRows = [
       ["소모 산소", `${Math.round(r.o2L).toLocaleString()} L (${Math.round(r.o2TankPct)}%)`],
-      ["냉각수", `${r.waterKg.toFixed(2)} kg`],
+      ["소모 에너지", `${r.kcal.toLocaleString()} kcal`],
       ["방사선 노출", `${r.radiationUSv.toFixed(1)} μSv`],
       ["최대 경사", `${r.maxSlopeDeg.toFixed(1)}°`],
       ["누적 오르막", `${Math.round(r.climbM)} m`],
-      ["최고 고도", formatElev(r.maxElevM)],
+      ["도착", arrivalText],
+    ];
+    const moreRows = [
+      ["평균 속도", `${(r.distanceM / 1000 / Math.max(r.hours, 1e-6)).toFixed(1)} km/h`],
       ["누적 내리막", `${Math.round(r.descentM)} m`],
+      ["최고 고도", formatElev(r.maxElevM)],
       ["모래 지대", formatDistance(r.sandM)],
       ["거친 지면", `${formatDistance(r.roughM)} (위험 ${(r.ankleRisk * 100).toFixed(0)})`],
       ["그늘 구간", `${Math.round(r.shadowPct)}%`],
       ["통신 유지", r.commPct == null ? "기지 없음" : `${Math.round(r.commPct)}%`],
       ["최대 귀환 시간", r.maxReturnMin == null ? "—" : `${r.returnCapped ? "≥ " : ""}${formatDuration(r.maxReturnMin / 60)}`],
       ["기온", `${Math.round(r.minTempC)} ~ ${Math.round(r.maxTempC)}°C`],
+      ["냉각수", `${r.waterKg.toFixed(2)} kg`],
       ["배터리", `${Math.round(r.batteryPct)}%`],
-      ["도착", `${formatClock(marsTime(r.arrival, r.path[r.path.length - 1].lon).ltst)}${r.sunsetMarginS == null ? " (밤)" : r.sunsetMarginS >= 0 ? ` · 일몰 ${formatDuration(r.sunsetMarginS / 3600)} 전` : " · 일몰 후"}`],
-      ["평균 속도", `${(r.distanceM / 1000 / Math.max(r.hours, 1e-6)).toFixed(1)} km/h`],
     ];
-    for (const [k, v] of rows) {
-      const wrap = document.createElement("div");
-      const dt = document.createElement("dt");
-      dt.textContent = k;
-      const dd = document.createElement("dd");
-      dd.textContent = v;
-      wrap.append(dt, dd);
-      stats.append(wrap);
-    }
+    const fillStats = (dl, rows) => {
+      for (const [k, v] of rows) {
+        const wrap = document.createElement("div");
+        const dt = document.createElement("dt");
+        dt.textContent = k;
+        const dd = document.createElement("dd");
+        dd.textContent = v;
+        wrap.append(dt, dd);
+        dl.append(wrap);
+      }
+    };
+    fillStats(stats, mainRows);
+    const more = document.createElement("dl");
+    more.className = "route-card__stats route-card__stats--more";
+    more.hidden = !nav.detailOpen;
+    fillStats(more, moreRows);
+    // 카드 자체가 버튼이라 안에 버튼을 못 넣음 → 눌리는 글자로 처리 (카드 선택과는 따로 동작)
+    const moreToggle = document.createElement("span");
+    moreToggle.className = "route-card__more";
+    moreToggle.setAttribute("role", "button");
+    moreToggle.setAttribute("aria-expanded", String(!!nav.detailOpen));
+    moreToggle.textContent = nav.detailOpen ? "간단히" : "자세히";
+    moreToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      nav.detailOpen = !nav.detailOpen;
+      renderResults();
+    });
 
     card.append(head, summary, profileSvg(r), axis);
     // 나의 정보 한도 · 일몰 · 통신 경고
@@ -1119,7 +1141,7 @@ function renderResults() {
       }
       card.append(warn);
     }
-    card.append(stats);
+    card.append(stats, more, moreToggle);
     card.addEventListener("click", () => {
       nav.selectedId = r.id;
       renderResults();

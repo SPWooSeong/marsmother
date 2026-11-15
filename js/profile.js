@@ -5,8 +5,14 @@
 const PROFILE_KEY = "marsmother.profile";
 const ABSOLUTE_SLOPE_DEG = 30; // 절대 장애물: 누구도 걸어서 못 넘는 비탈 (설정과 무관)
 
+// 기본 이름은 언어에 맞춤 (js/i18n.js): 영어 "Crew 1" · 한국어 "대원 1"
+const PROFILE_NAME_DEFAULTS = { ko: "대원 1", en: "Crew 1" };
+function defaultProfileName() {
+  return PROFILE_NAME_DEFAULTS[typeof getLanguage === "function" ? getLanguage() : "ko"] || PROFILE_NAME_DEFAULTS.ko;
+}
+
 const PROFILE_FIELDS = [
-  { id: "name", label: "이름", type: "text", def: "대원 1" },
+  { id: "name", label: "이름", type: "text", def: defaultProfileName() },
   { id: "bodyKg", label: "몸무게", unit: "kg", min: 40, max: 130, step: 1, def: 75, hint: "걷는 데 드는 에너지(Pandolf 식)에 반영" },
   { id: "walkKmh", label: "걷기 속도 (평지)", unit: "km/h", min: 1.5, max: 100, step: 0.1, def: 3.6, hint: "우주복을 입고 평지를 걷는 속도. 경사 · 모래에서는 여기서 더 느려짐 (Apollo 평균 ≈ 3.6 km/h · 시연용으로 100 까지)" },
   { id: "slopeLimitDeg", label: "경사 한계", unit: "°", min: 5, max: ABSOLUTE_SLOPE_DEG, step: 1, def: 15, hint: `이보다 가파른 곳은 경로에서 제외 (${ABSOLUTE_SLOPE_DEG}° 이상은 누구나 통행 불가)` },
@@ -129,3 +135,18 @@ function renderProfilePanel() {
   panel.append(form, summary, reset);
 }
 renderProfilePanel();
+
+// 언어를 바꾸면 기본 이름도 그 언어로 (직접 지은 이름은 그대로 둠)
+document.addEventListener("languagechange", () => {
+  const field = PROFILE_FIELDS.find((f) => f.id === "name");
+  field.def = defaultProfileName();
+  if (!Object.values(PROFILE_NAME_DEFAULTS).includes(PROFILE.name)) return;
+  PROFILE.name = field.def;
+  // 이름만 바뀐 것이라 "나의 정보 변경됨" 알림(경로 다시 계산 안내)은 보내지 않음
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(PROFILE));
+  } catch {
+    // 저장 실패 시 이번 접속 동안만 유지
+  }
+  renderProfilePanel();
+});
