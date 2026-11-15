@@ -19,6 +19,8 @@
         <!-- 길찾기 결과 경로 -->
         <svg id="nav-routes" class="map__routes" aria-hidden="true"></svg>
       </div>
+      <!-- 과학 레이어 (레이어 탭에서 켜고 끔, js/layers.js). 400 km 범위라 화면 크기 캔버스에 매번 다시 그림 -->
+      <canvas id="science-layers" class="map__science" aria-hidden="true"></canvas>
       <!-- 위치 추정에 쓴 고해상도 궤도 사진 (현재 위치 찾기 후 표시, 확대하면 선명) -->
       <img id="loc-patch" class="map__patch" alt="" draggable="false" />
     </div>
@@ -29,17 +31,24 @@
       <div id="globe-cesium" class="globe-cesium"></div>
       <div id="globe-loading" class="globe-loading" hidden>화성 3D 지형 불러오는 중…</div>
       <span class="globe-hint">드래그 회전 · 휠 확대/축소 · Ctrl+드래그 기울이기</span>
+      <!-- 고도 표시 (실제 DEM: MOLA 400 km + HiRISE 30 km): 색 지도 + 범례 + 마우스 위치 고도 (js/globe.js) -->
+      <div class="globe-elev">
+        <label class="globe-elev__toggle">고도 표시 <input type="checkbox" id="globe-elev-toggle" checked /></label>
+        <div id="globe-elev-legend" class="globe-elev__legend"></div>
+      </div>
+      <div id="globe-elev-readout" class="globe-elev__readout" hidden></div>
     </section>
     <div id="globe-msg" class="globe-msg" role="status" hidden></div>
 
     <!-- HUD 모드 (AR 화면): 왼쪽 아래 HUD 창을 누르면 전환 -->
     <section id="hud-view" class="hud-view" hidden aria-label="HUD 모드">
-      <!-- 1인칭 시야 (360° 파노라마, 드래그로 둘러보기) -->
+      <!-- 1인칭 시야: 3D 를 못 그릴 때만 쓰는 현위치 360° 지형 시점 (DEM 으로 렌더링) -->
       <div id="hud-scene" class="hud-scene"></div>
       <!-- 실제 지형 1인칭 3D (data/ 의 DEM + 가시광 모자이크) -->
       <canvas id="hud-3d" class="hud-3d" hidden></canvas>
       <div id="hud-loading" class="hud-loading" hidden>실제 지형(DEM · 궤도 사진) 불러오는 중…</div>
-      <span class="hud-source">지형: 실제 DEM + 가시광 모자이크 (HiRISE · CTX · HRSC)</span>
+      <!-- 오른쪽 위: 실제 DEM 에서 읽은 고도 · 경사 (js/hud.js) -->
+      <span id="hud-terrain" class="hud-source" role="status">지형 데이터 불러오는 중…</span>
       <!-- 지형 스캔 (안전/주의/위험 색 표시) -->
       <canvas id="hud-scan" class="hud-scan"></canvas>
       <!-- 포인트 AR 표시 -->
@@ -132,16 +141,31 @@
       </section>
 
       <section class="drawer__panel" role="tabpanel" id="panel-layer" aria-labelledby="tab-layer">
-        <ul class="layer-list">
-          <li><label>위성 사진 <input type="checkbox" checked /></label></li>
-          <li><label>CTX · HiRISE <input type="checkbox" checked /></label></li>
-          <li><label>MOLA DEM <input type="checkbox" /></label></li>
-          <li><label>THEMIS 열관성 <input type="checkbox" checked /></label></li>
-          <li><label>Aqueous mineral 분포 <input type="checkbox" class="is-blue" checked /></label></li>
-          <li><label>모래 빠질 위험 있는 곳 <input type="checkbox" class="is-red" checked /></label></li>
+        <!-- data-layer 가 있는 항목은 js/layers.js 에서 켜고 끔 (범례도 거기서 그림) -->
+        <ul id="layer-list" class="layer-list">
+          <li class="layer-list__group">기본 지도</li>
+          <li><label>위성 사진 <input type="checkbox" data-layer="basemap" checked /></label></li>
+          <li><label>CTX · HiRISE <input type="checkbox" data-layer="hirise" checked /></label></li>
+          <li><label>MOLA DEM (고도 · 광역) <input type="checkbox" data-layer="mola_dem" /></label></li>
+          <li><label>HiRISE DEM (고도 · 고해상도) <input type="checkbox" data-layer="hirise_dem" /></label></li>
+
+          <li class="layer-list__group">열관성 (MGS TES)</li>
+          <li><label>TES 열관성 <input type="checkbox" data-layer="ti_overlay" /></label></li>
+          <li><label>표면 물질 구분 <input type="checkbox" data-layer="ti_surface_units" /></label></li>
+          <li><label>모래 빠질 위험 있는 곳 <input type="checkbox" class="is-red" data-layer="ti_sand_trap" /></label></li>
+          <li><label>노출 암반 후보 <input type="checkbox" data-layer="ti_anomalies" /></label></li>
+          <li><label>열관성 등치선 <input type="checkbox" data-layer="ti_contours" /></label></li>
+
+          <li class="layer-list__group">물의 흔적 (JMARS)</li>
+          <li><label>지질 시대 <input type="checkbox" data-layer="geology" /></label></li>
+          <li><label>옛 계곡망 <input type="checkbox" data-layer="valleys" /></label></li>
+          <li><label>호수 · 삼각주 <input type="checkbox" data-layer="water_bodies" /></label></li>
+          <li><label>Aqueous mineral 분포 <input type="checkbox" class="is-blue" data-layer="minerals" /></label></li>
+
           <li class="layer-list__divider" role="separator"></li>
-          <li><label>방사선 위험 <input type="checkbox" /></label></li>
+          <li><label>방사선 위험 (추정) <input type="checkbox" class="is-red" data-layer="radiation" /></label></li>
         </ul>
+        <p class="layer-note">과학 레이어는 Gusev 주변 400 km 범위예요. 지도를 축소하면 전체가 보여요.</p>
       </section>
 
       <section class="drawer__panel" role="tabpanel" id="panel-point" aria-labelledby="tab-point" hidden>
@@ -154,6 +178,39 @@
         <p class="drawer__empty">나의 정보 (준비 중)</p>
       </section>
     </aside>
+
+    <!-- 오른쪽 위: 시계 (화성 지방시 · 계절 · 지구 시각). 누르면 시각을 바꿀 수 있음 → 방사선 추정에 반영 (js/marstime.js) -->
+    <div id="time-widget" class="time-widget">
+      <button id="time-btn" class="time-widget__btn" aria-expanded="false" aria-controls="time-panel" title="시각 바꾸기">
+        <span class="time-widget__main">
+          <strong id="time-mars" class="time-widget__mars">--:--</strong>
+          <span class="time-widget__unit">화성 지방시</span>
+          <span id="time-live" class="time-widget__live">실시간</span>
+        </span>
+        <span id="time-season" class="time-widget__sub"></span>
+        <span id="time-earth" class="time-widget__sub"></span>
+      </button>
+      <div id="time-panel" class="time-widget__panel" hidden>
+        <label class="time-widget__field">
+          지구 시각으로 지정
+          <input id="time-input" type="datetime-local" />
+        </label>
+        <div class="time-widget__steps">
+          <button type="button" data-shift="h:-1">−1시간</button>
+          <button type="button" data-shift="h:1">+1시간</button>
+          <button type="button" data-shift="sol:-1">−1솔</button>
+          <button type="button" data-shift="sol:1">+1솔</button>
+          <button type="button" data-shift="sol:-30">−30솔</button>
+          <button type="button" data-shift="sol:30">+30솔</button>
+        </div>
+        <button type="button" id="time-now" class="time-widget__now">현재 시각으로</button>
+        <div class="time-widget__rad">
+          <span>현위치 방사선 (추정)</span>
+          <strong id="time-dose">계산 중…</strong>
+        </div>
+        <ul id="time-detail" class="time-widget__detail"></ul>
+      </div>
+    </div>
 
     <!-- 가운데 위: 탐색 지역 선택 -->
     <div class="region-select">
@@ -198,7 +255,7 @@
       </button>
     </div>
 
-    <!-- 사진 위치 뷰어: 위 = 360° 파노라마(시간 선택), 아래 = 그 외 사진 -->
+    <!-- 지점 뷰어: 위 = 그 자리의 360° 지형 시점 (DEM 으로 렌더링), 아래 = 궤도 사진 등 -->
     <dialog id="photo-viewer" class="photo-viewer">
       <header class="photo-viewer__head">
         <div>
@@ -210,7 +267,7 @@
 
       <section class="pano">
         <div id="pano-view" class="pano__view" aria-label="360° 파노라마. 좌우로 드래그해서 방향 바꾸기">
-          <span class="pano__badge">360°</span>
+          <span class="pano__badge">360° · DEM 지형 시점 (사진 아님)</span>
           <span id="pano-heading" class="pano__heading"></span>
           <span class="pano__center" aria-hidden="true"></span>
           <span class="pano__hint">↔ 드래그하거나 슬라이더로 돌려보기</span>
@@ -348,8 +405,16 @@
     </dialog>
   </main>
 
+  <script src="js/data/spirit.js"></script>
+  <script src="js/data/sites.js"></script>
   <script src="js/data/points.js"></script>
+  <script src="js/data/layers.js"></script>
+  <script src="js/data/terrain.js"></script>
+  <script src="js/dem.js"></script>
+  <script src="js/eva.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/marstime.js"></script>
+  <script src="js/layers.js"></script>
   <script src="js/route.js"></script>
   <script src="js/hud.js"></script>
   <!-- 3D 지도: CesiumJS 는 3D 버튼을 처음 누를 때 불러옴 (인터넷 연결 필요) -->

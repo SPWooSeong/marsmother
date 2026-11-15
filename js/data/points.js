@@ -8,17 +8,10 @@ const REGIONS = {
     image: "assets/maps/columbia-hills.png",
     widthM: 29990,
     bounds: { lonMin: 175.1753, lonMax: 175.6981, latMin: -14.8277, latMax: -14.3215 },
-    // 3D 지형: 실제 DEM을 축소한 높이맵 (밝을수록 높음, minM~maxM 범위)
-    terrain: { heightmap: "assets/terrain/gusev-height.png", minM: -2023.2, maxM: -1829.0 },
-    // HUD 1인칭 3D 지형: data/ 원본 DEM + 가시광 모자이크에서 현위치 주변 3km 를 잘라냄
-    hudTerrain: {
-      height: "assets/terrain/hud-near-height.png", // 601×601, 5m 간격, 16bit (R 상위 · G 하위)
-      surface: "assets/terrain/hud-near-surface.jpg", // 2048×2048, 약 1.5 m/px
-      bounds: { lonMin: 175.4618523, lonMax: 175.5141477, latMin: -14.6033059, latMax: -14.5526941 },
-      minM: -1946.9,
-      maxM: -1923.51,
-    },
-    // 데모용 현위치 (실제로는 탐사 대원의 위치 장비 값으로 교체)
+    // HUD 1인칭 3D 지형의 표면 사진: 현위치 주변 3km (가시광 모자이크, 2048×2048, 약 1.5 m/px)
+    // 높이(DEM)는 js/data/terrain.js 의 DEM_DATA (near · hirise · mola) 를 사용
+    hudTerrain: { surface: "assets/terrain/hud-near-surface.jpg" },
+    // 탐사 대원의 현위치 (시작 값). ◎ 버튼(현재 위치 찾기)을 누르면 지형 매칭으로 추정한 위치로 바뀜
     currentPosition: { lon: 175.488, lat: -14.578 },
     // 위치 추정(지형 매칭)용 실제 데이터
     //  - 관측: NASA Spirit 로버 Navcam 수직투영 모자이크 (PDS, sol 36, site 4) → 0.5m 격자
@@ -62,126 +55,41 @@ const POINT_TYPES = {
   custom: { label: "내 포인트", color: "#ff7b54" },
 };
 
-// 사진 위치 핀을 누르면 보이는 사진들 (데모용 흑백 이미지)
-// - panorama: 360° 파노라마 1장 (위쪽 뷰어, 슬라이더/드래그로 방향 돌려보기)
-// - gallery: 그 외 사진들 (아래쪽 격자)
-function demoMedia(scene, galleryStart) {
-  return {
-    panorama: `assets/photos/pano-${scene}.jpg`,
-    gallery: Array.from({ length: 8 }, (_, i) => `assets/photos/gallery-${((galleryStart + i) % 12) + 1}.jpg`),
-  };
-}
-
-// ⚠️ 아래 Spirit 관련 좌표는 화면 확인용 "대략적인 예시" 입니다.
-//    실제 서비스에서는 NASA PDS의 MER Spirit 주행 경로 데이터 등으로 교체하세요.
+// Gusev 포인트: 모두 실제 데이터
+//  - Spirit 이동 경로 · 주요 지점: NASA 주행 기록 (js/data/spirit.js ← preprocess/build_traverse.py)
+//  - 지점을 누르면: DEM 으로 그린 그 자리의 360° 지형 시점 + 궤도 사진 3장 (js/data/sites.js ← preprocess/build_sites.py)
+//  - sol 36 Navcam: Spirit 이 실제로 찍은 사진을 위에서 내려다보게 이어 붙인 것 (위치 추정 기능과 같은 자료)
 const REGION_POINTS = {
   gusev: [
     {
       id: "spirit-route",
       type: "route",
       name: "Spirit 이동 경로",
-      note: "착륙 지점 → Columbia Hills → Home Plate (예시)",
-      path: [
-        [175.4726, -14.5684],
-        [175.476, -14.567],
-        [175.485, -14.573],
-        [175.495, -14.579],
-        [175.504, -14.588],
-        [175.513, -14.595],
-        [175.516, -14.608],
-        [175.514, -14.609],
-      ],
+      note: `실제 주행 기록 · sol 1 ~ ${SPIRIT_TRAVERSE.lastSol} · 약 ${(SPIRIT_TRAVERSE.distanceM / 1000).toFixed(1)} km`,
+      path: SPIRIT_TRAVERSE.path.map(([lon, lat]) => [lon, lat]),
     },
-    {
-      id: "spirit-landing",
+    ...SPIRIT_TRAVERSE.landmarks.map((l) => ({
+      id: l.id,
       type: "landmark",
-      name: "Columbia Memorial Station",
-      note: "Spirit 착륙 지점 (2004-01-04)",
-      lon: 175.4726,
-      lat: -14.5684,
-    },
+      name: l.name,
+      note: `${l.note} · 고도 ${Math.round(l.elevM)} m`,
+      lon: l.lon,
+      lat: l.lat,
+      sol: l.sol,
+      media: SITE_MEDIA[l.id] && { panorama: SITE_MEDIA[l.id].panorama, gallery: SITE_MEDIA[l.id].gallery },
+    })),
     {
-      id: "bonneville",
-      type: "landmark",
-      name: "Bonneville Crater",
-      note: "착륙 직후 탐사한 크레이터",
-      lon: 175.476,
-      lat: -14.567,
-    },
-    {
-      id: "husband-hill",
-      type: "landmark",
-      name: "Husband Hill 정상",
-      note: "Columbia Hills 최고봉",
-      lon: 175.513,
-      lat: -14.595,
-    },
-    {
-      id: "home-plate",
-      type: "landmark",
-      name: "Home Plate",
-      note: "화산성 층상 지형",
-      lon: 175.516,
-      lat: -14.608,
-    },
-    {
-      id: "troy",
-      type: "landmark",
-      name: "Troy",
-      note: "Spirit 최종 정지 위치 (2009)",
-      lon: 175.514,
-      lat: -14.609,
-    },
-    // 사진 위치: photo 는 데모용 흑백 이미지 (실제 로버 사진 아님)
-    {
-      id: "photo-landing",
+      id: "photo-sol36",
       type: "photo",
-      name: "착륙 지점 파노라마",
-      note: "데모 사진",
-      lon: 175.471,
-      lat: -14.57,
-      photo: "assets/photos/demo-1.jpg",
-      media: demoMedia(1, 0),
-    },
-    {
-      id: "photo-bonneville",
-      type: "photo",
-      name: "Bonneville 가장자리",
-      note: "데모 사진",
-      lon: 175.479,
-      lat: -14.564,
-      photo: "assets/photos/demo-2.jpg",
-      media: demoMedia(2, 3),
-    },
-    {
-      id: "photo-lahontan",
-      type: "photo",
-      name: "Lahontan 부근",
-      note: "데모 사진",
-      lon: 175.495,
-      lat: -14.581,
-      photo: "assets/photos/demo-3.jpg",
-      media: demoMedia(1, 6),
-    },
-    {
-      id: "everest-pano",
-      type: "photo",
-      name: "Everest 파노라마",
-      note: "Husband Hill 정상에서 촬영한 360° 파노라마 (데모 사진)",
-      lon: 175.511,
-      lat: -14.593,
-      photo: "assets/photos/demo-4.jpg",
-      media: demoMedia(2, 9),
-    },
-    {
-      id: "photo-home-plate",
-      type: "photo",
-      name: "Home Plate 근접 촬영",
-      note: "데모 사진",
-      lon: 175.518,
-      lat: -14.607,
-      photo: "assets/photos/demo-5.jpg",
-      media: demoMedia(1, 2),
+      name: "Spirit Navcam (sol 36)",
+      note: "2004-02-09 Spirit 이 실제로 찍은 주변 사진 (위에서 내려다보게 이어 붙임, 약 80 m 범위)",
+      lon: 175.477951,
+      lat: -14.571504,
+      photo: "assets/localize/spirit-sol036-view.jpg",
+      media: {
+        panorama: SITE_MEDIA["spirit-landing"].panorama,
+        gallery: ["assets/localize/spirit-sol036-view.jpg", ...SITE_MEDIA["spirit-landing"].gallery],
+      },
     },
   ],
 };

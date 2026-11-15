@@ -1,4 +1,4 @@
-// Mars Mother - 현재 위치 찾기 (지형 매칭 기반 전역 위치 추정, 데모)
+// Mars Mother - 현재 위치 찾기 (지형 매칭 기반 전역 위치 추정 · 실제 Spirit Navcam 사진 + 궤도 사진)
 //
 // 참고 논문: Nash et al., "Censible: A Robust and Practical Global Localization Framework
 //            for Planetary Surface Missions", ICRA 2024 (NASA JPL, Perseverance 탑재)

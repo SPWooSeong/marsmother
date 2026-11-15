@@ -1,14 +1,20 @@
-// Mars Mother - HUD 모드 (AR 데모)
+// Mars Mother - HUD 모드 (AR)
 // 왼쪽 아래 HUD 창을 누르면 1인칭 AR 화면으로 전환되고, 그 창은 2D 미니맵이 됨.
 // 배경: data/ 의 실제 DEM(지형 높이) + 가시광 모자이크(표면 사진)로 그린 1인칭 3D 지형 (three.js).
+//       발밑 3 km 는 HiRISE 2 m 격자, 그 밖 30 km 는 HiRISE 30 m, 지평선(400 km)은 MOLA.
 //       3D를 쓸 수 없으면 360° 파노라마 사진으로 대신 표시.
-// TODO: 카메라 영상, 실제 방위 센서, DEM 기반 위험도, 실제 생체 신호로 교체
+// 지형 스캔(안전/주의/위험)은 실제 DEM 경사로 계산.
+// 생체/장비 상태는 실제 지형 위를 걷는 만큼 js/eva.js 보행 모델로 계산 (산소 · 냉각수 · 전력 · 피로도),
+// 방사선은 js/marstime.js 모델. 경로 안내는 길찾기와 같은 DEM 기반 A* 경로.
+// 실제 장비가 생기면 바꿀 곳: 카메라 영상(배경), 방위 센서(hud.heading), 위치 장비(getCurrentPosition), 우주복 센서(evaState)
 //
 // 사용하는 전역 값: REGIONS, currentRegion, POINT_TYPES, getPoints, mapImage, lonLatToImage,
 // formatLonLat (main.js) / getCurrentPosition, nav, DEG_TO_M (route.js)
+// DEM_ORDER, DEM_LABELS, loadDemGrid, formatElevation (dem.js) / SCIENCE_LAYERS (data/layers.js)
+// currentRadiation (marstime.js) / radiationRange (layers.js)
 
 // ---------- 설정 ----------
-const HUD_PANO = "assets/photos/pano-1.jpg";
+const HUD_PANO = SITE_MEDIA.here.panorama; // 3D 를 못 그릴 때: 시작 위치에서 DEM 으로 그린 360° 지형 시점
 const HORIZON_RATIO = 0.42; // 파노라마 사진에서 지평선 높이 (위에서부터 비율)
 const EYE_HEIGHT_M = 1.7; // 눈높이
 const SCAN_RANGE_M = 45; // 스캔 거리
@@ -50,7 +56,8 @@ const hud = {
   bob: 0, // 걸을 때 화면 흔들림
   moving: false,
   world: { e: 0, n: 0 }, // 지역 중심 기준 내 위치 (m, 동/북)
-  demoRoute: null, // 길찾기 결과가 없을 때 쓰는 데모 경로
+  autoRoute: null, // 길찾기 결과가 없을 때 현위치 → 목적지로 직접 계산한 실제 경로
+  autoRouteKey: "",
 };
 
 // 파노라마 비율 읽기
@@ -71,13 +78,14 @@ function setHudMode(on) {
   if (on) {
     setHudVisible(true); // HUD 창이 꺼져 있었다면 켜기 (돌아갈 버튼이므로)
     resizeHudCanvas();
+    updateVitals();
     buildVitals();
     hud.lastCompassHeading = null;
     hud.lastT = 0;
     hud.keys.clear();
     syncWorldPosition();
-    prepareDemoRoute();
-    initTerrain3D(); // 처음 한 번 실제 지형 불러오기 (비동기)
+    prepareAutoRoute();
+    initTerrain3D(); // 처음 한 번 실제 지형(DEM) 불러오기 (비동기)
     resizeTerrain3D();
     hud.raf = requestAnimationFrame(hudFrame);
   } else {
@@ -143,6 +151,7 @@ function hudFrame(now) {
   // 2) 지형 스캔 + 위험 구역 표시 + 전방 상태
   updateCallouts(drawScan(L));
   updateAhead();
+  updateTerrainStatus(now);
 
   // 2-1) AR 경로 안내 (바닥 위 경로 + 안내 카드)
   updateRouteGuide(L, now);
@@ -165,34 +174,20 @@ function hudFrame(now) {
   hud.raf = requestAnimationFrame(hudFrame);
 }
 
-// ---------- 지형 스캔 (데모 위험도) ----------
-// 실제로는 DEM 경사, 모래 지대, 방사선 등으로 계산할 값. 지금은 부드러운 가짜 노이즈.
-function hazardAt(x, z) {
-  return (
-    0.5 +
-    0.25 * Math.sin(x * 0.11 + 0.7) * Math.cos(z * 0.09 - 0.3) +
-    0.2 * Math.sin((x * 0.6 + z) * 0.045 + 2) +
-    0.1 * Math.sin(x * 0.31) * Math.sin(z * 0.27)
-  );
-}
+// ---------- 지형 스캔 (실제 DEM 경사) ----------
+// 우주복을 입고 걷는 기준: 8° 부터 주의, 15° 부터 위험 (MER 로버의 주행 한계도 15~20°)
+const SLOPE_CAUTION_DEG = 8;
+const SLOPE_DANGER_DEG = 15;
+const HAZARD_NAMES = { safe: "안전", caution: "주의", danger: "위험" };
 
-function hazardLevel(v) {
-  if (v < 0.56) return "safe";
-  if (v < 0.72) return "caution";
+function hazardLevel(slopeDeg) {
+  if (slopeDeg < SLOPE_CAUTION_DEG) return "safe";
+  if (slopeDeg < SLOPE_DANGER_DEG) return "caution";
   return "danger";
 }
 
-// 위험 이유 (데모): 위치에 따라 구역별로 하나씩 정해짐
-const HAZARD_REASONS = {
-  caution: ["느슨한 모래", "완만한 경사", "자갈 지대", "지면 균열"],
-  danger: ["모래 함몰", "급경사", "낙석 위험", "방사선 높음"],
-};
-const HAZARD_NAMES = { safe: "안전", caution: "주의", danger: "위험" };
-
-function hazardReason(level, x, z) {
-  const list = HAZARD_REASONS[level];
-  if (!list) return "";
-  return list[Math.abs(Math.floor(x * 0.06 + z * 0.045 + 10)) % list.length];
+function hazardReason(level, slopeDeg) {
+  return `${level === "danger" ? "급경사" : "경사"} ${Math.round(slopeDeg)}°`;
 }
 
 function resizeHudCanvas() {
@@ -203,7 +198,7 @@ function resizeHudCanvas() {
 }
 window.addEventListener("resize", () => hud.on && resizeHudCanvas());
 
-// 이미 가진 지형 데이터로 주변 위험도를 바로 표시하고, 시야 안에서 가장 가까운 위험/주의 구역을 돌려줌
+// 실제 DEM 경사로 주변 위험도를 표시하고, 시야 안에서 가장 가까운 위험/주의 구역을 돌려줌
 function drawScan(L) {
   const ctx = hudCtx;
   ctx.clearRect(0, 0, L.W, L.H);
@@ -227,7 +222,9 @@ function drawScan(L) {
       const sx = pr.x;
       const sy = pr.y;
 
-      const level = hazardLevel(hazardAt(wx, wz));
+      const slope = slopeAt(wx, wz);
+      if (slope == null) continue; // 지형 데이터를 아직 못 불러옴
+      const level = hazardLevel(slope);
       const near = 1 - d / SCAN_RANGE_M; // 가까울수록 1
       const alpha = Math.min(1, 0.25 + near * 0.6);
       ctx.fillStyle = `rgba(${HAZARD_COLORS[level]}, ${alpha})`;
@@ -241,7 +238,7 @@ function drawScan(L) {
 
         // 화면 가장자리에 너무 붙지 않은 것 중 가장 가까운 구역 기억
         if (sx > 80 && sx < L.W - 80 && (!nearest[level] || d < nearest[level].d)) {
-          nearest[level] = { d, sx, sy, reason: hazardReason(level, wx, wz) };
+          nearest[level] = { d, sx, sy, reason: hazardReason(level, slope) };
         }
       }
     }
@@ -263,26 +260,30 @@ function updateCallouts(nearest) {
   }
 }
 
-// 바라보는 방향 바로 앞(3~25m)에서 처음 만나는 위험 요소
+// 바라보는 방향 바로 앞(3~25m)에서 처음 만나는 위험 요소 (실제 경사)
 function updateAhead() {
   const h = (hud.heading * Math.PI) / 180;
   let found = null;
+  let hasData = false;
   for (let d = 3; d <= 25; d += 1) {
-    const x = hud.world.e + Math.sin(h) * d;
-    const z = hud.world.n + Math.cos(h) * d;
-    const level = hazardLevel(hazardAt(x, z));
+    const slope = slopeAt(hud.world.e + Math.sin(h) * d, hud.world.n + Math.cos(h) * d);
+    if (slope == null) continue;
+    hasData = true;
+    const level = hazardLevel(slope);
     if (level === "danger") {
-      found = { level, d, reason: hazardReason(level, x, z) };
+      found = { level, d, reason: hazardReason(level, slope) };
       break;
     }
-    if (level === "caution" && !found) found = { level, d, reason: hazardReason(level, x, z) };
+    if (level === "caution" && !found) found = { level, d, reason: hazardReason(level, slope) };
   }
 
   const level = found ? found.level : "safe";
   hudAheadEl.className = `hud-ahead is-${level}`;
-  hudAheadEl.textContent = found
-    ? `전방 ${found.d}m · ${HAZARD_NAMES[level]} · ${found.reason}`
-    : "전방 25m 이내 안전";
+  hudAheadEl.textContent = !hasData
+    ? "지형 데이터 불러오는 중…"
+    : found
+      ? `전방 ${found.d}m · ${HAZARD_NAMES[level]} · ${found.reason}`
+      : "전방 25m 이내 안전";
 }
 
 // ---------- AR 포인트 / 목적지 ----------
@@ -309,12 +310,12 @@ function arTargets() {
       ...bearingTo(here, p),
     }));
 
-  // 길찾기 도착지가 있으면 목적지로 표시 (없으면 데모 경로의 목적지)
+  // 길찾기 도착지가 있으면 목적지로 표시 (없으면 자동 경로의 목적지)
   const end = nav.stops[nav.stops.length - 1];
   if (end.lonLat) {
     targets.push({ name: `도착지${end.name ? " · " + end.name : ""}`, color: "#b38cff", isGoal: true, ...bearingTo(here, end.lonLat) });
-  } else if (hud.demoRoute) {
-    const d = hud.demoRoute;
+  } else if (hud.autoRoute) {
+    const d = hud.autoRoute;
     targets.push({ name: `목적지 · ${d.destName}`, color: "#b38cff", isGoal: true, ...bearingTo(here, d.path[d.path.length - 1]) });
   }
   return targets;
@@ -397,14 +398,57 @@ function renderCompass() {
   hudHeadingEl.textContent = `${Math.round(normDeg(hud.heading)) % 360}°  ${tilt >= 0 ? "▲" : "▼"}${Math.abs(tilt)}°`;
 }
 
-// ---------- 생체/장비 상태 (데모 값) ----------
+// ---------- 생체/장비 상태 (js/eva.js 보행 모델) ----------
+// 우주복 탱크 · 배터리가 가득 찬 상태로 시작해서, 실제 지형 위를 걷는 만큼 (경사 · 속도 · 지면) 줄어듦
+const evaState = {
+  o2L: EVA.o2TankL,
+  waterKg: EVA.waterKg,
+  batteryWh: EVA.batteryWh,
+  energyKj: 0,
+  metabolicW: evaMetabolicW(0, 0),
+  doseUSv: 0,
+};
+
 const vitals = [
-  { id: "o2", label: "O₂", value: 72, color: "#4cc9f0", big: true, sub: "잔여 4:12" },
-  { id: "fatigue", label: "피로도", value: 35, color: "#ffd166" },
-  { id: "water", label: "수분", value: 64, color: "#7df9c4" },
-  { id: "power", label: "전력", value: 81, color: "#c084fc" },
-  { id: "rad", label: "방사선", value: 18, color: "#ff7b54", sub: "0.42 mSv" },
+  { id: "o2", label: "O₂", value: 100, color: "#4cc9f0", big: true, sub: "" },
+  { id: "fatigue", label: "피로도", value: 0, color: "#ffd166" },
+  { id: "water", label: "냉각수", value: 100, color: "#7df9c4" },
+  { id: "power", label: "전력", value: 100, color: "#c084fc" },
+  { id: "rad", label: "방사선", value: 0, color: "#ff7b54", sub: "계산 중" },
 ];
+
+// 매 프레임: 지금 소비 전력만큼 산소 · 냉각수 · 전력을 씀 (dt: 실제 흐른 초)
+function updateEva(dt, speed, grade, eta) {
+  const W = evaMetabolicW(speed, grade, eta);
+  evaState.metabolicW = W;
+  evaState.o2L = Math.max(0, evaState.o2L - evaO2LPerS(W) * dt);
+  evaState.waterKg = Math.max(0, evaState.waterKg - evaWaterKgPerS(W) * dt);
+  evaState.batteryWh = Math.max(0, evaState.batteryWh - (EVA.suitPowerW * dt) / 3600);
+  evaState.energyKj += (W * dt) / 1000;
+  const r = currentRadiation();
+  if (r.dose != null) evaState.doseUSv += (r.dose * 1000 * dt) / 86400;
+}
+
+function hoursLeft(amount, perHour) {
+  const h = amount / Math.max(perHour, 1e-9);
+  return `${Math.floor(h)}:${String(Math.floor((h % 1) * 60)).padStart(2, "0")}`;
+}
+
+function updateVitals() {
+  const byId = Object.fromEntries(vitals.map((v) => [v.id, v]));
+  const W = evaState.metabolicW;
+  byId.o2.value = (evaState.o2L / EVA.o2TankL) * 100;
+  byId.o2.num = Math.round(byId.o2.value);
+  byId.o2.sub = `잔여 ${hoursLeft(evaState.o2L, evaO2LPerS(W) * 3600)}`;
+  byId.fatigue.value = Math.min(100, (evaState.energyKj / EVA.dailyEnergyKj) * 100);
+  byId.fatigue.num = Math.round(byId.fatigue.value);
+  byId.fatigue.sub = `${Math.round(W)} W`;
+  byId.water.value = (evaState.waterKg / EVA.waterKg) * 100;
+  byId.water.num = Math.round(byId.water.value);
+  byId.power.value = (evaState.batteryWh / EVA.batteryWh) * 100;
+  byId.power.num = Math.round(byId.power.value);
+  updateRadiationVital();
+}
 
 function ringSvg(v, r, stroke) {
   const c = 2 * Math.PI * r;
@@ -426,7 +470,7 @@ function buildVitals() {
         ${ringSvg(v, v.big ? 44 : 22, v.big ? 7 : 5)}
         <div class="hud-ring__text">
           <span class="hud-ring__label">${v.label}</span>
-          <span class="hud-ring__num">${Math.round(v.value)}${v.big ? "" : ""}</span>
+          <span class="hud-ring__num">${v.num ?? Math.round(v.value)}</span>
           ${v.sub ? `<span class="hud-ring__sub">${v.sub}</span>` : ""}
         </div>
       </div>`
@@ -434,16 +478,22 @@ function buildVitals() {
     .join("");
 }
 
-// 데모: 시간이 지나면 산소는 줄고 피로도는 늘어남
+// 방사선: 현위치 고도 + 시계의 시각으로 추정한 선량 (모델은 marstime.js).
+// 고리는 가능한 범위(가장 낮은 값~가장 높은 값) 안에서 지금 값이 어디쯤인지
+function updateRadiationVital() {
+  const v = vitals.find((x) => x.id === "rad");
+  const r = currentRadiation();
+  if (r.dose == null) return;
+  const [lo, hi] = radiationRange();
+  v.value = Math.max(0, Math.min(100, ((r.dose - lo) / (hi - lo)) * 100));
+  v.num = r.dose.toFixed(2);
+  v.sub = `누적 ${evaState.doseUSv.toFixed(1)} μSv`;
+}
+
+// 1초마다 숫자 갱신 (값 자체는 매 프레임 updateEva 에서 줄어듦)
 setInterval(() => {
   if (!hud.on) return;
-  const o2 = vitals.find((v) => v.id === "o2");
-  const fatigue = vitals.find((v) => v.id === "fatigue");
-  const exertion = hud.moving ? (hud.keys.has("ShiftLeft") || hud.keys.has("ShiftRight") ? 4 : 2) : 1; // 걷거나 뛰면 더 빨리
-  o2.value = Math.max(0, o2.value - 0.05 * exertion);
-  fatigue.value = Math.min(100, fatigue.value + 0.03 * exertion * exertion);
-  const mins = Math.round((o2.value / 72) * 252);
-  o2.sub = `잔여 ${Math.floor(mins / 60)}:${String(mins % 60).padStart(2, "0")}`;
+  updateVitals();
   buildVitals();
 }, 1000);
 
@@ -491,9 +541,9 @@ document.addEventListener("keyup", (e) => hud.keys.delete(e.code));
 window.addEventListener("blur", () => hud.keys.clear());
 
 // ---------- 이동 (WASD) ----------
-const WALK_MPS = 3.5; // 데모라 실제 걸음(약 1.4m/s)보다 빠르게
-const RUN_MPS = 9;
-const TURN_DPS = 70; // ←→ 회전 속도 (°/초)
+// 걷는 속도는 발밑 실제 경사 · 지면에 따라 정해짐 (js/eva.js). Shift: 뛰기
+// 시뮬레이션 배속: 1 = 실제 시간. 올리면 이동 · 산소 등 소모가 같은 배수로 빨라짐
+const HUD_TIME_SCALE = 1;const TURN_DPS = 70; // ←→ 회전 속도 (°/초)
 const PITCH_DPS = 50; // ↑↓ 고개 속도 (°/초)
 
 function setPitch(deg) {
@@ -527,19 +577,32 @@ function updateMovement(dt) {
   const side = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
   const here = getCurrentPosition();
   hud.moving = !!(here && (fwd || side));
-  if (!hud.moving) return;
+  const simDt = dt * HUD_TIME_SCALE;
+  if (!hud.moving) {
+    hud.speed = 0;
+    updateEva(simDt, 0, 0);
+    return;
+  }
 
-  const speed = k.has("ShiftLeft") || k.has("ShiftRight") ? RUN_MPS : WALK_MPS;
   const norm = Math.hypot(fwd, side);
   const h = (hud.heading * Math.PI) / 180;
-  // 바라보는 방향 기준: 앞(fwd) + 오른쪽(side) → 동/북
-  const east = ((fwd * Math.sin(h) + side * Math.cos(h)) / norm) * speed * dt;
-  const north = ((fwd * Math.cos(h) - side * Math.sin(h)) / norm) * speed * dt;
+  const dirE = (fwd * Math.sin(h) + side * Math.cos(h)) / norm; // 가는 방향 (동/북 단위 벡터)
+  const dirN = (fwd * Math.cos(h) - side * Math.sin(h)) / norm;
+  // 가는 방향 2 m 앞의 실제 높이 차로 경사, 지면은 열관성 모래 위험으로
+  const { e, n } = hud.world;
+  const grade = (terrainHeight(e + dirE * 2, n + dirN * 2) - terrainHeight(e, n)) / 2;
+  const eta = terrainEta(here.lon, here.lat);
+  const running = k.has("ShiftLeft") || k.has("ShiftRight");
+  const speed = evaSpeed(grade, eta) * (running ? EVA.runFactor : 1);
+  hud.speed = speed;
+  hud.grade = grade;
+  updateEva(simDt, speed, grade, eta);
+  // 뛰면 대사량이 더 큼 (걷기 대비 속도² 만큼 늘어나는 Pandolf 항이 이미 반영됨)
 
-  here.lat += north / DEG_TO_M;
-  here.lon += east / (DEG_TO_M * Math.cos((here.lat * Math.PI) / 180));
+  here.lat += (dirN * speed * simDt) / DEG_TO_M;
+  here.lon += (dirE * speed * simDt) / (DEG_TO_M * Math.cos((here.lat * Math.PI) / 180));
   hud.world = worldOf(here);
-  hud.bob += dt * speed * 2.4;
+  hud.bob += simDt * speed * 2.4;
 }
 
 // ---------- AR 경로 안내 ----------
@@ -552,14 +615,11 @@ const hudGuideWarn = document.getElementById("hud-guide-warn");
 const ROUTE_AHEAD_M = 160; // 바닥에 그릴 경로 길이 (앞쪽)
 const OFF_ROUTE_M = 15;
 
-// 길찾기 결과가 없으면 현위치 → (도착지 또는 Home Plate) 데모 경로를 만들어 둠
-function prepareDemoRoute() {
+// 길찾기 결과가 없으면 현위치 → (도착지 또는 Home Plate) 경로를 실제 지형으로 계산 (안전한 길 기준)
+async function prepareAutoRoute() {
   if (nav.results.some((r) => r.id === nav.selectedId)) return;
   const here = getCurrentPosition();
-  if (!here) {
-    hud.demoRoute = null;
-    return;
-  }
+  if (!here) return;
   const end = nav.stops[nav.stops.length - 1];
   let dest = end.lonLat ? { ...end.lonLat, name: end.name || "도착지" } : null;
   if (!dest) {
@@ -568,15 +628,23 @@ function prepareDemoRoute() {
     if (p) dest = { lon: p.lon, lat: p.lat, name: p.name };
   }
   if (!dest) return;
-  // route.js 의 데모 경로 생성 함수 재사용 (나중에 실제 알고리즘으로 교체)
-  const r = buildDemoRoute(ROUTE_OPTIONS[0], [{ lon: here.lon, lat: here.lat }, dest]);
-  hud.demoRoute = { ...r, destName: dest.name, isDemo: true };
+  // 같은 출발 · 도착이면 다시 계산하지 않음 (걷는 동안 출발점은 50 m 단위로만 봄)
+  const key = `${here.lon.toFixed(3)},${here.lat.toFixed(3)}>${dest.lon},${dest.lat}`;
+  if (key === hud.autoRouteKey) return;
+  hud.autoRouteKey = key;
+  try {
+    const [r] = await findRoutes([{ lon: here.lon, lat: here.lat }, dest], [ROUTE_OPTIONS[0]]);
+    hud.autoRoute = r ? { ...r, destName: dest.name, isAuto: true } : null;
+  } catch (e) {
+    console.warn("HUD 경로를 계산하지 못했어요.", e);
+    hud.autoRoute = null;
+  }
 }
 
 function currentHudRoute() {
   const sel = nav.results.find((r) => r.id === nav.selectedId);
-  if (sel) return { ...sel, destName: nav.stops[nav.stops.length - 1].name || "도착지", isDemo: false };
-  return hud.demoRoute;
+  if (sel) return { ...sel, destName: nav.stops[nav.stops.length - 1].name || "도착지", isAuto: false };
+  return hud.autoRoute;
 }
 
 // 경로 → 지역 기준 미터 좌표 + 누적 거리 (경로가 바뀔 때만 계산)
@@ -684,7 +752,7 @@ function updateRouteGuide(L, now) {
   hudGuideArrow.style.transform = `rotate(${turn}deg)`;
 
   const speedMps = route.distanceM / Math.max(route.hours * 3600, 1);
-  hudGuideLabel.textContent = `${route.isDemo ? "데모 경로" : "길찾기 경로"} · ${route.name}`;
+  hudGuideLabel.textContent = `${route.isAuto ? "자동 경로" : "길찾기 경로"} · ${route.name}`;
   hudGuideDest.textContent = route.destName;
   hudGuideDist.textContent = `남은 거리 ${formatKm(remaining)} · 약 ${formatDuration(remaining / speedMps / 3600)}`;
 
@@ -695,6 +763,7 @@ function updateRouteGuide(L, now) {
     state = "is-arrived";
   } else if (near.d > OFF_ROUTE_M) {
     warn = `경로에서 ${Math.round(near.d)}m 벗어났어요`;
+    if (route.isAuto && near.d > 60) prepareAutoRoute(); // 많이 벗어나면 지금 위치에서 다시 계산
     state = "is-off";
   } else if (Math.abs(turn) > 35) {
     warn = `${turn > 0 ? "오른쪽" : "왼쪽"}으로 ${Math.round(Math.abs(turn))}° 돌아가세요`;
@@ -709,18 +778,27 @@ function hexAlpha(hex, a) {
 }
 
 // =========================================================
-// 실제 지형 1인칭 3D (data/ 의 DEM + 가시광 모자이크 → three.js)
-//  - 근거리: 현위치 주변 3km, DEM 5m 간격 + 표면 사진 약 1.5m/px
-//  - 원거리: 지역 전체 30km, 저해상도 높이맵 + 지도 사진 (지평선의 Columbia Hills 까지)
+// 실제 지형 (data/ 의 DEM → js/dem.js) + 1인칭 3D (three.js)
+//  - near   : 현위치 주변 3 km, HiRISE 2 m 격자 + 표면 사진 약 1.5 m/px
+//  - hirise : Columbia Hills 30 km, 30 m 격자 + 지도 사진
+//  - mola   : Gusev 주변 400 km, MOLA 400 m 격자 → 지평선의 크레이터 테두리까지
 // =========================================================
 const THREE_URL = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
 const TERRAIN_BASE_M = -1913; // 3D 좌표 높이 기준 (DEM 중앙값 부근)
 const HUD_PITCH_DEFAULT = -8; // 처음 고개 각도: 살짝 아래 (발밑 지형이 보이도록)
 const HUD_PITCH_MIN = -70; // 발밑까지
 const HUD_PITCH_MAX = 35; // 하늘 쪽
-const hud3d = { ready: false, loading: false, failed: false };
+const hud3d = {
+  ready: false,
+  loading: false,
+  failed: false,
+  grids: [], // 월드 좌표로 옮긴 DEM 격자 (정밀한 것부터) — 고도 · 경사 조회용
+  dataPromise: null,
+  origin: { e: 0, n: 0 }, // 화성 곡률 계산의 기준점 (처음 서 있던 곳)
+};
 const hudLoading = document.getElementById("hud-loading");
 const hudTerrainCanvas = document.getElementById("hud-3d");
+const hudTerrainStatus = document.getElementById("hud-terrain");
 
 function loadScriptOnce(src) {
   if (window.THREE) return Promise.resolve();
@@ -731,24 +809,6 @@ function loadScriptOnce(src) {
     s.onerror = () => reject(new Error(`${src} 를 불러오지 못했어요`));
     document.head.append(s);
   });
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`${src} 를 불러오지 못했어요`));
-    img.src = src;
-  });
-}
-
-function imagePixels(img) {
-  const c = document.createElement("canvas");
-  c.width = img.naturalWidth;
-  c.height = img.naturalHeight;
-  const g = c.getContext("2d");
-  g.drawImage(img, 0, 0);
-  return { w: c.width, h: c.height, data: g.getImageData(0, 0, c.width, c.height).data };
 }
 
 // 높이 격자에서 (fx, fy) 위치 값 (bilinear)
@@ -762,39 +822,140 @@ function sampleGrid(grid, fx, fy) {
   return (v[i] * (1 - ax) + v[i + 1] * ax) * (1 - ay) + (v[i + grid.w] * (1 - ax) + v[i + grid.w + 1] * ax) * ay;
 }
 
-// 월드 좌표 (지역 중심 기준 동 e, 북 n, m) 의 실제 지형 높이 (m, DEM 절대값)
-function terrainHeight(e, n) {
-  const near = hud3d.near;
-  if (near && e >= near.e0 && e <= near.e1 && n >= near.n0 && n <= near.n1) {
-    return sampleGrid(near, ((e - near.e0) / (near.e1 - near.e0)) * (near.w - 1), ((near.n1 - n) / (near.n1 - near.n0)) * (near.h - 1));
+// ---------- DEM 격자 → 월드 좌표 + 경사 ----------
+// 격자 한 칸마다 경사(°)를 미리 계산 (0.5° 단위로 저장). 이웃 칸과의 실제 높이 차로 계산
+function slopeGrid(g) {
+  const { w, h, values: v } = g;
+  const dx = (g.e1 - g.e0) / (w - 1);
+  const dy = (g.n1 - g.n0) / (h - 1);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const yu = Math.max(0, y - 1), yd = Math.min(h - 1, y + 1);
+    for (let x = 0; x < w; x++) {
+      const xl = Math.max(0, x - 1), xr = Math.min(w - 1, x + 1);
+      const gx = (v[y * w + xr] - v[y * w + xl]) / ((xr - xl) * dx);
+      const gy = (v[yu * w + x] - v[yd * w + x]) / ((yd - yu) * dy);
+      out[y * w + x] = Math.min(255, Math.round(((Math.atan(Math.hypot(gx, gy)) * 180) / Math.PI) * 2));
+    }
   }
-  const far = hud3d.far;
-  if (!far) return TERRAIN_BASE_M;
-  return sampleGrid(far, ((e - far.e0) / (far.e1 - far.e0)) * (far.w - 1), ((far.n1 - n) / (far.n1 - far.n0)) * (far.h - 1));
+  return out;
 }
 
+function worldGrid(dem) {
+  const b = dem.bounds;
+  const nw = worldOf({ lon: b.lonMin, lat: b.latMax });
+  const se = worldOf({ lon: b.lonMax, lat: b.latMin });
+  const g = { key: dem.key, w: dem.w, h: dem.h, values: dem.values, e0: nw.e, e1: se.e, n0: se.n, n1: nw.n };
+  g.slope = slopeGrid(g);
+  return g;
+}
+
+// DEM 불러오기 (three.js 없이도 고도 · 경사 위험도는 동작)
+function loadHudTerrainData() {
+  if (!hud3d.dataPromise) {
+    hud3d.dataPromise = Promise.allSettled(DEM_ORDER.map(loadDemGrid)).then((results) => {
+      hud3d.grids = results.filter((r) => r.status === "fulfilled").map((r) => worldGrid(r.value));
+      const failed = results.find((r) => r.status === "rejected");
+      if (failed) console.warn("DEM 일부를 불러오지 못했어요.", failed.reason);
+    });
+  }
+  return hud3d.dataPromise;
+}
+
+function gridAt(e, n) {
+  for (const g of hud3d.grids) {
+    if (e >= g.e0 && e <= g.e1 && n >= g.n0 && n <= g.n1) return g;
+  }
+  return null;
+}
+
+// 월드 좌표 (지역 중심 기준 동 e, 북 n, m) 의 실제 지형 높이 (m, DEM 절대값)
+function terrainHeight(e, n) {
+  const g = gridAt(e, n);
+  if (!g) return TERRAIN_BASE_M;
+  return sampleGrid(g, ((e - g.e0) / (g.e1 - g.e0)) * (g.w - 1), ((g.n1 - n) / (g.n1 - g.n0)) * (g.h - 1));
+}
+
+// 월드 좌표의 실제 경사 (°). 지형 데이터가 없으면 null
+function slopeAt(e, n) {
+  const g = gridAt(e, n);
+  if (!g) return null;
+  const x = Math.round(((e - g.e0) / (g.e1 - g.e0)) * (g.w - 1));
+  const y = Math.round(((g.n1 - n) / (g.n1 - g.n0)) * (g.h - 1));
+  return g.slope[y * g.w + x] / 2;
+}
+
+// 3D 장면 속 높이: 화성이 둥글어서 멀리 있는 지형은 그만큼 아래로 내려가 보임 (80 km 밖 → 약 940 m)
+function sceneY(e, n, h = terrainHeight(e, n)) {
+  const de = e - hud3d.origin.e;
+  const dn = n - hud3d.origin.n;
+  return h - TERRAIN_BASE_M - (de * de + dn * dn) / (2 * MARS_RADIUS_M);
+}
+
+// 오른쪽 위 지형 정보: 고도 · 발밑 경사 · 모래 빠짐 위험 · 데이터 출처
+let terrainStatusT = 0;
+function updateTerrainStatus(now) {
+  if (now - terrainStatusT < 250) return;
+  terrainStatusT = now;
+  const { e, n } = hud.world;
+  const g = gridAt(e, n);
+  if (!g) {
+    hudTerrainStatus.textContent = hud3d.grids.length ? "DEM 범위 밖" : "지형 데이터 불러오는 중…";
+    return;
+  }
+  const here = getCurrentPosition();
+  const sand = here && sandRiskAt(here.lon, here.lat)?.name;
+  hudTerrainStatus.textContent =
+    `고도 ${formatElevation(terrainHeight(e, n))} · 발밑 경사 ${slopeAt(e, n).toFixed(1)}°` +
+    (sand ? ` · 모래 빠짐 위험 ${sand}` : "") +
+    ` · ${DEM_LABELS[g.key]}`;
+}
+
+// ---------- 3D 지형 메시 ----------
 // 높이 격자를 지형 메시로 (PlaneGeometry: 위쪽 줄 = 북쪽)
-function terrainMesh(grid, segW, segH, texture, { lift = 0, polygonOffset = false } = {}) {
+//  hole: 더 정밀한 격자가 덮는 범위 → 그 안쪽 칸은 만들지 않음 (겹쳐서 깜빡이는 것 방지)
+function terrainMesh(grid, segW, segH, material, { lift = 0, hole = null } = {}) {
   const width = grid.e1 - grid.e0;
   const depth = grid.n1 - grid.n0;
+  const cx = (grid.e0 + grid.e1) / 2;
+  const cn = (grid.n0 + grid.n1) / 2;
   const geo = new THREE.PlaneGeometry(width, depth, segW, segH);
   geo.rotateX(-Math.PI / 2); // (x, y) → (x, 0, -y) : 북쪽 = -z
   const pos = geo.attributes.position;
   for (let r = 0; r <= segH; r++) {
     for (let c = 0; c <= segW; c++) {
-      const i = r * (segW + 1) + c;
       const h = sampleGrid(grid, (c / segW) * (grid.w - 1), (r / segH) * (grid.h - 1));
-      pos.setY(i, h - TERRAIN_BASE_M + lift);
+      pos.setY(r * (segW + 1) + c, sceneY(grid.e0 + (c / segW) * width, grid.n1 - (r / segH) * depth, h) + lift);
     }
   }
   geo.computeVertexNormals();
+
+  if (hole) {
+    const cw = width / segW;
+    const ch = depth / segH;
+    const src = geo.index.array;
+    const kept = [];
+    for (let r = 0; r < segH; r++) {
+      for (let c = 0; c < segW; c++) {
+        const e0 = grid.e0 + c * cw, n1 = grid.n1 - r * ch;
+        // 한 칸 여유를 두고 완전히 안쪽에 있는 칸만 뺌 (가장자리는 겹쳐서 틈이 없게)
+        if (e0 - cw >= hole.e0 && e0 + 2 * cw <= hole.e1 && n1 + ch <= hole.n1 && n1 - 2 * ch >= hole.n0) continue;
+        const i = (r * segW + c) * 6;
+        for (let k = 0; k < 6; k++) kept.push(src[i + k]);
+      }
+    }
+    geo.setIndex(kept);
+  }
+
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.position.set(cx, 0, -cn);
+  return mesh;
+}
+
+function photoMaterial(texture) {
   texture.encoding = THREE.sRGBEncoding;
   texture.anisotropy = 8;
-  const mat = new THREE.MeshLambertMaterial({ map: texture, color: 0xe0a77c }); // 흑백 사진을 화성 색으로
-  if (polygonOffset) Object.assign(mat, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set((grid.e0 + grid.e1) / 2, 0, -(grid.n0 + grid.n1) / 2);
-  return mesh;
+  return new THREE.MeshLambertMaterial({ map: texture, color: 0xe0a77c }); // 흑백 사진을 화성 색으로
 }
 
 // 화성 낮 하늘 (위는 어둡고 지평선은 밝은 버터스카치 색)
@@ -821,40 +982,22 @@ async function initTerrain3D() {
   hudLoading.hidden = false;
 
   try {
+    await loadHudTerrainData(); // 고도 · 경사는 여기까지만 돼도 동작
+    const grid = (key) => hud3d.grids.find((g) => g.key === key);
+    const near = grid("near"), far = grid("hirise"), wide = grid("mola");
+    if (!near || !far) throw new Error("DEM 을 불러오지 못했어요 (file:// 로 열었다면 로컬 서버로 열어야 해요)");
+    hud3d.origin = { ...hud.world };
+
     await loadScriptOnce(THREE_URL);
-    const region = REGIONS[currentRegion];
-    const [nearHeightImg, farHeightImg] = await Promise.all([loadImage(cfg.height), loadImage(region.terrain.heightmap)]);
-
-    // 근거리 높이: 16bit (R 상위 + G 하위)
-    const nh = imagePixels(nearHeightImg);
-    const nearValues = new Float32Array(nh.w * nh.h);
-    for (let i = 0; i < nearValues.length; i++) {
-      const q = nh.data[i * 4] * 256 + nh.data[i * 4 + 1];
-      nearValues[i] = cfg.minM + (q / 65535) * (cfg.maxM - cfg.minM);
-    }
-    const nb = cfg.bounds;
-    const nw = worldOf({ lon: nb.lonMin, lat: nb.latMax });
-    const ne = worldOf({ lon: nb.lonMax, lat: nb.latMin });
-    hud3d.near = { w: nh.w, h: nh.h, values: nearValues, e0: nw.e, e1: ne.e, n0: ne.n, n1: nw.n };
-
-    // 원거리 높이: 지역 전체 8bit
-    const fh = imagePixels(farHeightImg);
-    const farValues = new Float32Array(fh.w * fh.h);
-    const t = region.terrain;
-    for (let i = 0; i < farValues.length; i++) farValues[i] = t.minM + (fh.data[i * 4] / 255) * (t.maxM - t.minM);
-    const rb = region.bounds;
-    const fw = worldOf({ lon: rb.lonMin, lat: rb.latMax });
-    const fe = worldOf({ lon: rb.lonMax, lat: rb.latMin });
-    hud3d.far = { w: fh.w, h: fh.h, values: farValues, e0: fw.e, e1: fe.e, n0: fe.n, n1: fw.n };
 
     // 장면
-    const renderer = new THREE.WebGLRenderer({ canvas: hudTerrainCanvas, antialias: true });
+    const renderer = new THREE.WebGLRenderer({ canvas: hudTerrainCanvas, antialias: true, logarithmicDepthBuffer: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.outputEncoding = THREE.sRGBEncoding;
     const scene = new THREE.Scene();
     scene.background = marsSky();
-    scene.fog = new THREE.Fog(0xcfa47c, 400, 14000); // 먼지 낀 대기
-    const camera = new THREE.PerspectiveCamera(60, 1, 0.3, 40000);
+    scene.fog = new THREE.Fog(0xcfa47c, 600, 200000); // 먼지 낀 대기 (80 km 밖 크레이터 테두리가 흐릿하게 보일 정도)
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.3, 400000);
     camera.rotation.order = "YXZ";
 
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
@@ -867,8 +1010,10 @@ async function initTerrain3D() {
       loader.loadAsync(cfg.surface),
       loader.loadAsync(mapImage.getAttribute("src")),
     ]);
-    scene.add(terrainMesh(hud3d.far, 300, 290, farTex, { lift: -1.5 }));
-    scene.add(terrainMesh(hud3d.near, nh.w - 1, nh.h - 1, nearTex, { polygonOffset: true }));
+    // 광역(MOLA)은 사진이 없어 화성 색 + 음영만
+    if (wide) scene.add(terrainMesh(wide, 516, 500, new THREE.MeshLambertMaterial({ color: 0x8a6548 }), { lift: -3, hole: far }));
+    scene.add(terrainMesh(far, 300, 290, photoMaterial(farTex), { lift: -1.5, hole: near }));
+    scene.add(terrainMesh(near, 600, 600, photoMaterial(nearTex))); // 5 m 간격 (경사 계산은 2 m 격자 그대로)
 
     Object.assign(hud3d, { renderer, scene, camera, ready: true });
     hudTerrainCanvas.hidden = false;
@@ -898,7 +1043,7 @@ function updateTerrainCamera() {
   const cam = hud3d.camera;
   const { e, n } = hud.world;
   const bob = hud.moving ? Math.sin(hud.bob) * 0.05 : 0;
-  cam.position.set(e, terrainHeight(e, n) - TERRAIN_BASE_M + EYE_HEIGHT_M + bob, -n);
+  cam.position.set(e, sceneY(e, n) + EYE_HEIGHT_M + bob, -n);
   cam.rotation.y = (-hud.heading * Math.PI) / 180; // 0° = 북쪽(-z), 시계 방향으로 회전
   cam.rotation.x = (hud.pitch * Math.PI) / 180; // 고개 들기/숙이기
   cam.updateMatrixWorld();
@@ -919,7 +1064,7 @@ function projectRel(L, de, dn, up = 0.08) {
     const e = hud.world.e + de;
     const n = hud.world.n + dn;
     projTmp = projTmp || new THREE.Vector3();
-    projTmp.set(e, terrainHeight(e, n) - TERRAIN_BASE_M + up, -n);
+    projTmp.set(e, sceneY(e, n) + up, -n);
     projTmp.applyMatrix4(hud3d.camera.matrixWorldInverse);
     if (projTmp.z > -0.3) return null; // 카메라 뒤
     projTmp.applyMatrix4(hud3d.camera.projectionMatrix);
