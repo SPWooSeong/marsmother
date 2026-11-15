@@ -51,6 +51,8 @@ const POINT_TYPES = {
   route: { label: "로버 경로", color: "#7df9c4" },
   rover: { label: "Spirit Cam", color: "#ff9f1c" },
   cave: { label: "동굴", color: "#c084fc" },
+  lost: { label: "로버 교신 두절", color: "#ff5a5a" }, // 로버를 잃어버린 지점
+  base: { label: "기지", color: "#5eead4" }, // 통신 가시성 · 안전 귀환 기준 (HUD 에 기지 건물로 보임)
   custom: { label: "내 포인트", color: "#ff7b54" },
 };
 
@@ -91,5 +93,18 @@ const REGION_POINTS = {
       sol: r.startSol,
       media: { photos: r.photos, pano: widestPhotoIndex(r.photos) },
     })),
+    // Troy: Spirit 이 모래에 빠져 움직이지 못하다 교신이 끊긴 마지막 위치 → "로버 교신 두절" 포인트
+    ...SPIRIT_TRAVERSE.landmarks
+      .filter((l) => l.id === "troy")
+      .map((l) => ({
+        id: l.id,
+        type: "lost",
+        name: "Spirit 교신 두절 지점 (Troy)",
+        note: `${l.note} · 고도 ${Math.round(l.elevM)} m`,
+        lon: l.lon,
+        lat: l.lat,
+        sol: l.sol,
+        media: SITE_MEDIA[l.id] && { panorama: SITE_MEDIA[l.id].panorama, gallery: SITE_MEDIA[l.id].gallery },
+      })),
   ],
 };

@@ -222,7 +222,7 @@ function fitMap() {
   view.scale = fit;
   view.fitScale = fit;
   view.minScale = fit / 700; // 화성 전체가 보일 만큼 축소 가능
-  view.maxScale = fit * 10;
+  view.maxScale = fit * 40; // 화면 가로에 약 750 m 까지 확대
   view.x = (mapEl.clientWidth - w * fit) / 2;
   view.y = (mapEl.clientHeight - h * fit) / 2;
   applyView();
@@ -292,6 +292,41 @@ function endPointer(e) {
 mapEl.addEventListener("pointerup", endPointer);
 mapEl.addEventListener("pointercancel", endPointer);
 
+// ---------- 로버 경로에 마우스를 올리면: 로버가 그 자리를 지난 때 (sol · 지구 날짜) ----------
+// 주행 기록의 점마다 sol 이 있음 (js/data/spirit.js). Spirit 착륙 2004-01-04 04:35 UTC = sol 1, 1솔 = 88,775.244초
+const SPIRIT_LANDING_MS = Date.UTC(2004, 0, 4, 4, 35);
+const routeTip = document.createElement("div");
+routeTip.className = "route-tip";
+routeTip.hidden = true;
+mapEl.append(routeTip);
+
+mapEl.addEventListener("pointermove", (e) => {
+  let best = null;
+  const overMap = e.target === mapEl || mapEl.contains(e.target);
+  if (overMap && pointers.size === 0 && currentRegion === "gusev" && !hiddenPoints.has("spirit-route") && mapImage.naturalWidth) {
+    const rect = mapEl.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let bestD = 10 * 10; // 화면에서 10px 안
+    for (const pt of SPIRIT_TRAVERSE.path) {
+      const { x, y } = lonLatToImage(pt[0], pt[1]);
+      const dx = view.x + x * view.scale - mx, dy = view.y + y * view.scale - my;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = pt;
+      }
+    }
+    if (best) {
+      const date = new Date(SPIRIT_LANDING_MS + (best[2] - 1) * 88775244);
+      routeTip.textContent = `Spirit · sol ${best[2]} · ${date.toISOString().slice(0, 10)}`;
+      routeTip.style.left = `${mx + 14}px`;
+      routeTip.style.top = `${my - 10}px`;
+    }
+  }
+  routeTip.hidden = !best;
+});
+mapEl.addEventListener("pointerleave", () => (routeTip.hidden = true));
+
 // ---------- 포인트 (핀 / 경로 / 추가) ----------
 const SVG_NS = "http://www.w3.org/2000/svg";
 const pinsEl = document.getElementById("map-pins");
@@ -311,19 +346,25 @@ let pendingLonLat = null;
 // 사용자가 추가한 포인트는 브라우저(localStorage)에 지역별로 저장
 const storageKey = (region) => `marsmother.points.${region}`;
 
+// 단, 기지는 저장하지 않음 — 이번 접속 동안만 유지되고 새로고침하면 사라짐
+const sessionBases = {}; // region → 기지 포인트들
+
 function loadCustomPoints(region) {
+  let stored = [];
   try {
     const points = JSON.parse(localStorage.getItem(storageKey(region))) || [];
     // 없어진 종류(예: 예전 '주요 지점')로 저장된 포인트는 '내 포인트'로
-    return points.map((p) => (POINT_TYPES[p.type] ? p : { ...p, type: "custom" }));
+    stored = points.map((p) => (POINT_TYPES[p.type] ? p : { ...p, type: "custom" }));
   } catch {
-    return [];
+    // 저장된 값이 없거나 깨짐
   }
+  return [...stored.filter((p) => p.type !== "base"), ...(sessionBases[region] || [])];
 }
 
 function saveCustomPoints(region, points) {
+  sessionBases[region] = points.filter((p) => p.type === "base");
   try {
-    localStorage.setItem(storageKey(region), JSON.stringify(points));
+    localStorage.setItem(storageKey(region), JSON.stringify(points.filter((p) => p.type !== "base")));
   } catch {
     // 저장소를 쓸 수 없는 환경(시크릿 모드 등)에서는 이번 접속 동안만 유지
   }
@@ -477,13 +518,9 @@ function renderMapOverlays() {
         onPick({ lon: p.lon, lat: p.lat }, p);
         return;
       }
-      // 사진이 있는 포인트는 사진 뷰어 열기
-      if (p.media) {
-        selectPoint(p.id);
-        openPhotoViewer(p);
-        return;
-      }
-      selectPoint(p.id === selectedPointId ? null : p.id);
+      // 오른쪽 정보 창에 그 포인트의 설명 + 과학 데이터 (사진 · 파노라마는 창 안의 버튼으로) — js/inspect.js
+      selectPoint(p.id);
+      openInspect({ lon: p.lon, lat: p.lat }, p);
     });
     pinsEl.append(pin);
   }
@@ -652,6 +689,12 @@ function deleteCustomPoint(id) {
   if (selectedPointId === id) selectedPointId = null;
   renderPointList();
   renderMapOverlays();
+  document.dispatchEvent(new CustomEvent("pointschange"));
+}
+
+// 기지 포인트 (통신 가시성 · 안전 귀환 기준 · HUD 기지 건물)
+function getBases() {
+  return getPoints().filter((p) => p.type === "base" && p.lon != null && p.lat != null);
 }
 
 // 지도에서 위치 하나 고르기 (포인트 추가, 길찾기 출발/도착지 등에서 공용)
@@ -724,6 +767,7 @@ pointDialog.addEventListener("close", () => {
   renderPointList();
   renderMapOverlays();
   selectPoint(point.id);
+  document.dispatchEvent(new CustomEvent("pointschange"));
 });
 
 document.addEventListener("keydown", (e) => {
@@ -815,9 +859,13 @@ function openPhotoViewer(point) {
         onClick: () => showRoverPano(ph),
       }))
     : gallery.map((src) => ({ src, thumb: src }));
-  pvGalleryTitle.textContent = photos
-    ? `Spirit Cam · Pancam / Navcam · NASA Photojournal (${items.filter((it) => it.src).length})`
-    : `궤도 사진 · 가시광 모자이크 0.25 m/px (${items.length})`;
+  if (photos) {
+    pvGalleryTitle.textContent = `Spirit Cam · Pancam / Navcam · NASA Photojournal (${items.filter((it) => it.src).length})`;
+    pvGalleryTitle.hidden = false;
+  } else {
+    pvGalleryTitle.textContent = `궤도 사진 · 가시광 모자이크 0.25 m/px (${items.length})`;
+    pvGalleryTitle.hidden = !gallery.length; // 지점 조사(js/inspect.js)의 즉석 파노라마는 궤도 사진이 없음
+  }
   pvGallery.classList.toggle("gallery__grid--wide", !!photos);
   pvGallery.replaceChildren(
     ...items.map((it, i) => {
@@ -998,11 +1046,22 @@ function setDrawerOpen(open) {
   drawer.setAttribute("aria-hidden", String(!open));
   drawerBackdrop.hidden = !open;
   menuBtn.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("is-drawer-open", open); // 왼쪽 아래 HUD 창 등을 메뉴 옆으로 비켜 줌 (css)
 }
 
 menuBtn.addEventListener("click", () => setDrawerOpen(true));
 drawerCloseBtn.addEventListener("click", () => setDrawerOpen(false));
-// 메뉴 밖을 눌러도 닫히지 않음 (메뉴를 연 채로 지도를 조작할 수 있게). 닫기: × 버튼 · Esc
+// 메뉴를 연 채로 지도를 끌거나 확대할 수는 있고, 지도를 (끌지 않고) 클릭하면 메뉴가 닫힘. 그 밖에 닫기: × 버튼 · Esc
+for (const el of [mapEl, document.getElementById("hud-scan")]) {
+  let down = null;
+  // 누를 때 메뉴가 열려 있었던 경우만 (지도에서 위치 고르기는 고른 뒤 메뉴를 다시 여므로 그건 닫지 않음)
+  el.addEventListener("pointerdown", (e) => (down = drawer.classList.contains("is-open") ? { x: e.clientX, y: e.clientY } : null));
+  el.addEventListener("pointerup", (e) => {
+    const isClick = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5;
+    down = null;
+    if (isClick) setDrawerOpen(false);
+  });
+}
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") setDrawerOpen(false);
 });
@@ -1063,6 +1122,10 @@ const hudWindow = document.getElementById("hud-window");
 const hudCloseBtn = document.getElementById("hud-close-btn");
 const hudToggleBtn = document.getElementById("hud-toggle-btn");
 const hudResize = document.getElementById("hud-resize");
+// HUD 창 높이를 CSS 변수로 알려 줌 → 그 위에 놓이는 버튼(현재 위치 보정)이 창과 겹치지 않게
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty("--hud-card-h", `${hudWindow.offsetHeight}px`);
+}).observe(hudWindow);
 
 function setHudVisible(visible) {
   hudWindow.hidden = !visible;
