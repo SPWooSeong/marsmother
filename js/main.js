@@ -303,32 +303,62 @@ routeTip.className = "route-tip";
 routeTip.hidden = true;
 mapEl.append(routeTip);
 
-mapEl.addEventListener("pointermove", (e) => {
-  let best = null;
-  const overMap = e.target === mapEl || mapEl.contains(e.target);
-  if (overMap && pointers.size === 0 && currentRegion === "gusev" && !hiddenPoints.has("spirit-route") && mapImage.naturalWidth) {
+// 경로 점의 지도 사진 픽셀 좌표 [x0, y0, x1, y1, …] — 사진 크기가 정해진 뒤 한 번만 계산
+let spiritPathPx = null;
+function getSpiritPathPx() {
+  if (!spiritPathPx) {
+    const path = SPIRIT_TRAVERSE.path;
+    spiritPathPx = new Float64Array(path.length * 2);
+    path.forEach((pt, i) => {
+      const { x, y } = lonLatToImage(pt[0], pt[1]);
+      spiritPathPx[i * 2] = x;
+      spiritPathPx[i * 2 + 1] = y;
+    });
+  }
+  return spiritPathPx;
+}
+
+// pointermove 는 1초에 수백 번 올 수 있어서 화면 갱신(rAF)마다 한 번만 계산
+let routeTipFrame = 0;
+let routeTipEvent = null;
+function updateRouteTip() {
+  routeTipFrame = 0;
+  const e = routeTipEvent;
+  let best = -1;
+  if (pointers.size === 0 && currentRegion === "gusev" && !hiddenPoints.has("spirit-route") && mapImage.naturalWidth) {
     const rect = mapEl.getBoundingClientRect();
     const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    let bestD = 10 * 10; // 화면에서 10px 안
-    for (const pt of SPIRIT_TRAVERSE.path) {
-      const { x, y } = lonLatToImage(pt[0], pt[1]);
-      const dx = view.x + x * view.scale - mx, dy = view.y + y * view.scale - my;
+    // 화면 좌표 → 사진 좌표로 바꿔서 비교 (점마다 곱셈을 하지 않도록)
+    const ix = (mx - view.x) / view.scale, iy = (my - view.y) / view.scale;
+    let bestD = (10 / view.scale) ** 2; // 화면에서 10px 안
+    const px = getSpiritPathPx();
+    for (let i = 0; i < px.length; i += 2) {
+      const dx = px[i] - ix, dy = px[i + 1] - iy;
       const d = dx * dx + dy * dy;
       if (d < bestD) {
         bestD = d;
-        best = pt;
+        best = i / 2;
       }
     }
-    if (best) {
-      const date = new Date(SPIRIT_LANDING_MS + (best[2] - 1) * 88775244);
-      routeTip.textContent = `Spirit · sol ${best[2]} · ${date.toISOString().slice(0, 10)}`;
+    if (best >= 0) {
+      const sol = SPIRIT_TRAVERSE.path[best][2];
+      const date = new Date(SPIRIT_LANDING_MS + (sol - 1) * 88775244);
+      routeTip.textContent = `Spirit · sol ${sol} · ${date.toISOString().slice(0, 10)}`;
       routeTip.style.left = `${mx + 14}px`;
       routeTip.style.top = `${my - 10}px`;
     }
   }
-  routeTip.hidden = !best;
+  routeTip.hidden = best < 0;
+}
+mapEl.addEventListener("pointermove", (e) => {
+  routeTipEvent = e;
+  if (!routeTipFrame) routeTipFrame = requestAnimationFrame(updateRouteTip);
 });
-mapEl.addEventListener("pointerleave", () => (routeTip.hidden = true));
+mapEl.addEventListener("pointerleave", () => {
+  cancelAnimationFrame(routeTipFrame);
+  routeTipFrame = 0;
+  routeTip.hidden = true;
+});
 
 // ---------- 포인트 (핀 / 경로 / 추가) ----------
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -838,7 +868,8 @@ const PANO_WRAP_MIN_ASPECT = 3; // 로버 사진: 가로/세로가 이 이상이
 
 const pvPano = document.getElementById("pv-pano");
 const panoBadge = document.getElementById("pano-badge");
-const PANO_DEM_BADGE = panoBadge.textContent;
+// DOM 에서 읽으면 이미 영어로 바뀌어 있을 수 있으므로 (기본 언어가 영어) 한국어 원문을 직접 씀 — 번역은 js/i18n.js 가 함
+const PANO_DEM_BADGE = "360° · DEM 지형 시점 (사진 아님)";
 
 // 파노라마 이미지 바꾸기
 function setPanoImage(src, { aspect, wrap = true, photo = false, badge = PANO_DEM_BADGE } = {}) {

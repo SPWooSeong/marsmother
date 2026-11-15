@@ -36,7 +36,12 @@ function loadCesium() {
     const script = document.createElement("script");
     script.src = `${CESIUM_BASE}Cesium.js`;
     script.onload = resolve;
-    script.onerror = () => reject(new Error("CesiumJS 불러오기 실패"));
+    script.onerror = () => {
+      // 실패한 태그는 지워 둠 → 다시 누르면 새로 받아 봄 (태그가 쌓이지 않게)
+      script.remove();
+      css.remove();
+      reject(new Error("CesiumJS 불러오기 실패"));
+    };
     document.head.append(script);
   });
 }
@@ -46,7 +51,9 @@ async function initCesium() {
   Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
   Cesium.Ellipsoid.default = Cesium.Ellipsoid.MARS;
 
-  viewer = new Cesium.Viewer("globe-cesium", {
+  // 지형 불러오기에 실패한 뒤 다시 시도할 때는 만들어 둔 Viewer 를 그대로 씀
+  //  (새로 만들면 WebGL 컨텍스트와 화면이 겹겹이 쌓임)
+  if (!viewer) viewer = new Cesium.Viewer("globe-cesium", {
     globe: false, // 지구 대신 화성 3D Tiles 만 표시
     baseLayer: false,
     skyAtmosphere: new Cesium.SkyAtmosphere(Cesium.Ellipsoid.MARS),
@@ -221,10 +228,12 @@ function buildOverlays() {
   if (here) addPin(here.lon, here.lat, "현위치", "#4cc9f0", { big: true });
 }
 
-// 언어를 바꾸면 3D 위의 이름표도 다시 그림
-document.addEventListener("languagechange", () => {
-  if (viewer && document.body.classList.contains("is-3d")) buildOverlays();
-});
+// 언어 · 현위치 · 포인트 · 길찾기 결과가 바뀌면 3D 위의 표시도 다시 그림
+for (const type of ["languagechange", "positionchange", "pointschange", "routeschange"]) {
+  document.addEventListener(type, () => {
+    if (viewer && document.body.classList.contains("is-3d")) buildOverlays();
+  });
+}
 
 // ---------- 2D ↔ 3D 전환 ----------
 async function enter3D() {

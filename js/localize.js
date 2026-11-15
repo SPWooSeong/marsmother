@@ -530,6 +530,7 @@ function setLocBusy(busy) {
   loc.running = busy;
   locRetryBtn.disabled = busy;
   locRealBtn.disabled = busy;
+  locCloseBtn.disabled = busy; // 계산 중에 닫으면 결과가 몰래 적용되므로 끝날 때까지 못 닫음 (Esc 도 막혀 있음)
   if (busy) locShowBtn.disabled = true;
 }
 

@@ -22,8 +22,10 @@ button {
 
 .app {
   position: relative;
-  width: 100vw;
+  width: 100%;
   height: 100vh;
+  /* 모바일: 100vh 는 주소창이 접힌 높이라 아래 버튼이 툴바에 가려짐 → 실제 보이는 높이(dvh) */
+  height: 100dvh;
 }
 
 /* 지도 영역: 지금은 화성 느낌의 임시 배경 */
@@ -1525,6 +1527,7 @@ body.is-inspect-open:not(.is-hud):not(.is-3d) .scale-bar { right: calc(min(340px
   margin: auto;
   width: min(900px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;
@@ -2617,6 +2620,7 @@ body.is-3d .scale-bar {
   margin: auto;
   width: min(760px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   padding: 0 0 18px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 16px;

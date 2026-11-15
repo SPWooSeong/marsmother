@@ -564,6 +564,13 @@ const evaState = {
   metabolicW: evaMetabolicW(0, 0),
   doseUSv: 0,
 };
+let evaTankL = EVA.o2TankL; // 지금 evaState 가 기준으로 삼는 탱크 크기
+// 나의 정보에서 탱크 크기를 바꾸면 남은 비율은 그대로 두고 새 탱크에 맞춤 (안 그러면 460% · 음수 링이 나옴)
+document.addEventListener("profilechange", () => {
+  if (EVA.o2TankL === evaTankL || !(evaTankL > 0)) return;
+  evaState.o2L = (evaState.o2L / evaTankL) * EVA.o2TankL;
+  evaTankL = EVA.o2TankL;
+});
 
 // 오른쪽 아래 링: 산소(큰 링) · 피로도 · 방사선(누적/한도) · 귀환 여유
 //  냉각수 · 전력은 평소엔 숨김 — 둘 다 산소보다 늦게 떨어지게 돼 있어 따로 볼 필요가 없고,
@@ -694,8 +701,15 @@ function updateReturnVital() {
   const homeCell = envCellOf(home);
   const cell = envCellOf(here);
   // 각 칸 → 안전한 곳까지의 비용 지도. 30초마다 (걸으며 밝혀진 지형 반영) 또는 안전한 곳 · 나의 정보가 바뀌면 다시 계산
-  const key = `${homeCell}|${PROFILE.slopeLimitDeg}|${EVA.bodyKg}|${EVA.flatSpeedMps}|${Math.floor(Date.now() / 30000)}`;
-  if (hudReturn.key !== key && homeCell !== -1) {
+  //  (예전엔 아무것도 안 바뀌어도 30초마다 다시 계산했음 → 걸어서 지형이 밝혀졌을 때만, 그것도 30초에 한 번까지)
+  const key = `${homeCell}|${PROFILE.slopeLimitDeg}|${EVA.bodyKg}|${EVA.flatSpeedMps}`;
+  const terrainChanged = hudReturn.version !== survey.version && Date.now() - (hudReturn.at || 0) > 30000;
+  if (homeCell === -1) {
+    hudReturn.field = null; // 안전한 곳이 격자 밖이면 예전 기준의 값을 쓰지 않음
+    hudReturn.key = key;
+  } else if (hudReturn.key !== key || terrainChanged) {
+    hudReturn.version = survey.version;
+    hudReturn.at = Date.now();
     const v0 = evaSpeed(0);
     const flatJPerM = evaMetabolicW(v0, 0) / v0;
     hudReturn.field = envWalkField([homeCell], { reverse: true, by: "energy", limit: flatJPerM * RETURN_FIELD_M * 1.6 });
@@ -743,6 +757,21 @@ function updateMinimap() {
   }
   const Z = MINIMAP_ZOOM;
   const c = lonLatToImage(here.lon, here.lat);
+  hudPreview.style.setProperty("--heading", `${hud.heading}deg`);
+  // 매 프레임 다시 그리면 필터(흑백 · 컬러 · 빛) 3번 + 발자취 전체를 계속 그리게 됨
+  //  → 미니맵에서 1px 이상 움직였거나, 탐사 지형 · 경로 · 크기가 바뀐 때만 다시 그림 (방향은 위 CSS 변수로 돌림)
+  const route = currentHudRoute();
+  const drawKey = [
+    Math.round(c.x * Z * dpr),
+    Math.round(c.y * Z * dpr),
+    hudMiniCanvas.width,
+    hudMiniCanvas.height,
+    survey.loaded ? survey.version : -1,
+    survey.walks.length,
+    route ? `${minimapPathId(route.path)}|${route.color}` : "",
+  ].join("|");
+  if (hudMiniCanvas.drawKey === drawKey) return;
+  hudMiniCanvas.drawKey = drawKey;
   const g = hudMiniCanvas.getContext("2d");
   // 지도 사진 픽셀 → 미니맵 (내 위치가 가운데)
   g.setTransform(dpr * Z, 0, 0, dpr * Z, dpr * (w / 2 - c.x * Z), dpr * (h / 2 - c.y * Z));
@@ -790,7 +819,6 @@ function updateMinimap() {
   g.filter = "none";
 
   // 3) 고른 경로 (지금 위치부터 남은 길) + 도착지
-  const route = currentHudRoute();
   if (route) {
     g.beginPath();
     route.path.forEach((p, i) => {
@@ -833,7 +861,14 @@ function updateMinimap() {
       g.stroke();
     }
   }
-  hudPreview.style.setProperty("--heading", `${hud.heading}deg`);
+}
+
+// 경로 배열마다 번호 (같은 경로인지 미니맵 다시 그리기 판단용)
+const minimapPathIds = new WeakMap();
+let minimapPathSeq = 0;
+function minimapPathId(path) {
+  if (!minimapPathIds.has(path)) minimapPathIds.set(path, ++minimapPathSeq);
+  return minimapPathIds.get(path);
 }
 
 // ---------- 둘러보기 (드래그 / 키보드) ----------
@@ -1116,7 +1151,10 @@ function loadScriptOnce(src) {
     const s = document.createElement("script");
     s.src = src;
     s.onload = resolve;
-    s.onerror = () => reject(new Error(`${src} 불러오기 실패`));
+    s.onerror = () => {
+      s.remove(); // 다시 시도할 때 태그가 쌓이지 않게
+      reject(new Error(`${src} 불러오기 실패`));
+    };
     document.head.append(s);
   });
 }
@@ -1166,7 +1204,10 @@ function loadHudTerrainData() {
     hud3d.dataPromise = Promise.allSettled(DEM_ORDER.map(loadDemGrid)).then((results) => {
       hud3d.grids = results.filter((r) => r.status === "fulfilled").map((r) => worldGrid(r.value));
       const failed = results.find((r) => r.status === "rejected");
-      if (failed) console.warn("DEM 일부 불러오기 실패", failed.reason);
+      if (failed) {
+        console.warn("DEM 일부 불러오기 실패", failed.reason);
+        hud3d.dataPromise = null; // 다음에 다시 시도 (loadDemGrid 는 실패한 것만 다시 받음)
+      }
     });
   }
   return hud3d.dataPromise;
@@ -1465,7 +1506,8 @@ function updateAtmosphere(now) {
 
 async function initTerrain3D() {
   const cfg = REGIONS[currentRegion]?.hudTerrain;
-  if (hud3d.ready || hud3d.loading || hud3d.failed || !cfg) return;
+  // 실패해도 30초 뒤 HUD 를 다시 켜면 한 번 더 시도 (네트워크가 잠깐 끊긴 경우)
+  if (hud3d.ready || hud3d.loading || !cfg || (hud3d.failed && Date.now() - hud3d.failed < 30000)) return;
   hud3d.loading = true;
   hudLoading.hidden = false;
 
@@ -1513,7 +1555,7 @@ async function initTerrain3D() {
     resizeTerrain3D();
   } catch (e) {
     console.warn("실제 지형 3D 준비 실패 → 파노라마로 표시", e);
-    hud3d.failed = true;
+    hud3d.failed = Date.now();
   } finally {
     hud3d.loading = false;
     hudLoading.hidden = true;
@@ -1640,9 +1682,21 @@ function baseBlocksMove(e, n, mE, mN) {
 
 function rebuildHudBases() {
   if (!hud3d.ready) return;
-  if (hud3d.bases) hud3d.scene.remove(hud3d.bases);
+  const bases = typeof getBases === "function" ? getBases() : [];
+  // 포인트가 바뀌어도 기지 위치가 그대로면 다시 만들지 않음
+  const key = bases.map((p) => `${p.lon},${p.lat}`).join("|");
+  if (hud3d.bases && hud3d.basesKey === key) return;
+  hud3d.basesKey = key;
+  if (hud3d.bases) {
+    hud3d.scene.remove(hud3d.bases);
+    // 기지마다 geometry · material 을 새로 만들므로 GPU 메모리도 같이 풀어 줌
+    hud3d.bases.traverse((o) => {
+      o.geometry?.dispose();
+      for (const m of [].concat(o.material || [])) m.dispose();
+    });
+  }
   hud3d.bases = new THREE.Group();
-  for (const p of typeof getBases === "function" ? getBases() : []) {
+  for (const p of bases) {
     const { e, n } = worldOf(p);
     const mesh = buildBaseMesh();
     mesh.position.set(e, sceneY(e, n), -n);

@@ -19,6 +19,10 @@ const ENV_MARS_R = 3396190;
 const env = {
   shadow: { key: null, map: null, night: false, sun: null },
   shadowCache: new Map(),
+  sunSteps: new Map(), // 10분 단위 태양 위치 (envSunStep)
+  shadowVersion: -1,
+  zMax: -Infinity,
+  zMaxVersion: -1,
   comm: { key: null, vis: null, count: 0 },
   rad: { rate: null, min: 0 },
   ret: { key: null, frac: null, busy: false, info: null },
@@ -34,46 +38,84 @@ function envCellOf(p) {
 
 // ---------- 그림자 ----------
 // date 시각의 그림자 지도 (1 = 그늘). 해가 졌으면 전부 1
-function envShadowMap(date) {
+// 그늘 계산 준비: 10분 단위 태양 위치 → 격자에서 태양 쪽으로 한 걸음 (지도 전체 · 한 칸 계산이 같이 씀)
+function envSunStep(date) {
   const s = survey;
   const key = `${Math.floor(date.getTime() / 600000)}|${s.version}`; // 10분 단위
-  if (env.shadow.key === key) return env.shadow;
-  // 경로 통계는 시각별 그림자를 여러 장 씀 → 최근 것 몇 장은 기억해 둠
-  if (env.shadowCache.has(key)) return (env.shadow = env.shadowCache.get(key));
-  const { w, h, z, dx, dy, b } = s;
+  // 탐사로 지형이 바뀌면 예전 지형 기준 그림자는 다시 쓸 일이 없으므로 비움 (한 장 1 MB)
+  if (env.shadowVersion !== s.version) {
+    env.shadowVersion = s.version;
+    env.shadowCache.clear();
+    env.sunSteps = new Map();
+  }
+  let st = env.sunSteps.get(key);
+  if (st) return st;
+  const { z, dx, dy, b } = s;
   const sun = sunPosition(date, (b.lonMin + b.lonMax) / 2, (b.latMin + b.latMax) / 2);
-  const map = new Uint8Array(w * h);
-  const night = sun.elevationDeg <= 0.5;
-  if (night) map.fill(1);
-  else {
+  st = { key, sun, night: sun.elevationDeg <= 0.5 };
+  if (!st.night) {
     const horiz = Math.hypot(sun.east, sun.north);
-    const tanEl = sun.up / horiz;
+    st.tanEl = sun.up / horiz;
     // 태양 쪽으로 한 걸음: 격자에서 큰 쪽 성분이 1칸
     let sx = sun.east / horiz / dx, sy = -sun.north / horiz / dy; // 칸/m
     const norm = Math.max(Math.abs(sx), Math.abs(sy));
-    const stepM = 1 / norm; // 한 걸음의 수평 거리
-    sx /= norm;
-    sy /= norm;
-    let zMax = -Infinity;
-    for (let i = 0; i < z.length; i++) if (z[i] > zMax) zMax = z[i];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const z0 = z[y * w + x] + 1.2; // 사람 가슴 높이
-        const maxSteps = Math.min(400, Math.ceil((zMax - z0) / tanEl / stepM));
-        let k = 1;
-        while (k <= maxSteps) {
-          const px = Math.round(x + sx * k), py = Math.round(y + sy * k);
-          if (px < 0 || py < 0 || px >= w || py >= h) break;
-          if (z[py * w + px] > z0 + k * stepM * tanEl) {
-            map[y * w + x] = 1;
-            break;
-          }
-          k += k < 12 ? 1 : Math.ceil(k * 0.12); // 멀수록 성기게
-        }
-      }
+    st.stepM = 1 / norm; // 한 걸음의 수평 거리
+    st.sx = sx / norm;
+    st.sy = sy / norm;
+    if (env.zMaxVersion !== s.version) {
+      let zMax = -Infinity;
+      for (let i = 0; i < z.length; i++) if (z[i] > zMax) zMax = z[i];
+      env.zMax = zMax;
+      env.zMaxVersion = s.version;
     }
   }
-  env.shadow = { key, map, night, sun };
+  env.sunSteps.set(key, st);
+  if (env.sunSteps.size > 400) env.sunSteps.delete(env.sunSteps.keys().next().value);
+  return st;
+}
+
+// (x, y) 칸이 그늘인지: 태양 쪽으로 광선을 쏴서 더 높은 지형에 막히면 그늘
+function envShadowRay(st, x, y) {
+  const { w, h, z } = survey;
+  const { sx, sy, stepM, tanEl } = st;
+  const z0 = z[y * w + x] + 1.2; // 사람 가슴 높이
+  const maxSteps = Math.min(400, Math.ceil((env.zMax - z0) / tanEl / stepM));
+  let k = 1;
+  while (k <= maxSteps) {
+    const px = Math.round(x + sx * k), py = Math.round(y + sy * k);
+    if (px < 0 || py < 0 || px >= w || py >= h) break;
+    if (z[py * w + px] > z0 + k * stepM * tanEl) return true;
+    k += k < 12 ? 1 : Math.ceil(k * 0.12); // 멀수록 성기게
+  }
+  return false;
+}
+
+// date 시각에 칸 하나가 그늘인지 — 경로 통계처럼 몇 칸만 필요할 때 지도 전체(100만 칸)를 계산하지 않음
+function envShadowAt(date, cell) {
+  const st = envSunStep(date);
+  const full = env.shadowCache.get(st.key);
+  if (full) return !!full.map[cell];
+  if (st.night) return true;
+  const w = survey.w;
+  const x = cell % w;
+  return envShadowRay(st, x, (cell - x) / w);
+}
+
+function envShadowMap(date) {
+  const st = envSunStep(date);
+  const key = st.key;
+  if (env.shadow.key === key) return env.shadow;
+  // 최근 것 몇 장은 기억해 둠
+  if (env.shadowCache.has(key)) return (env.shadow = env.shadowCache.get(key));
+  const { w, h } = survey;
+  const map = new Uint8Array(w * h);
+  if (st.night) map.fill(1);
+  else {
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) if (envShadowRay(st, x, y)) map[y * w + x] = 1;
+    }
+  }
+  env.shadow = { key, map, night: st.night, sun: st.sun };
   env.shadowCache.set(key, env.shadow);
   if (env.shadowCache.size > 40) env.shadowCache.delete(env.shadowCache.keys().next().value);
   return env.shadow;
@@ -355,4 +397,9 @@ function envForRoute(startDate, safeCells, spanS) {
 for (const name of ["pointschange", "profilechange", "positionchange"]) {
   document.addEventListener(name, () => typeof scheduleScienceLayers === "function" && scheduleScienceLayers());
 }
-marsClock.onChange(() => typeof scheduleScienceLayers === "function" && scheduleScienceLayers());
+// 시각에 따라 달라지는 레이어(그늘 · 귀환 시간 · 위험도)가 켜져 있을 때만 다시 그림 (방사선은 js/layers.js 에서 따로)
+const ENV_CLOCK_LAYERS = ["return_limit", "hazard_level", "comm_view"];
+marsClock.onChange(() => {
+  if (typeof scheduleScienceLayers !== "function" || typeof enabledLayers === "undefined") return;
+  if (ENV_CLOCK_LAYERS.some((id) => enabledLayers.has(id))) scheduleScienceLayers();
+});

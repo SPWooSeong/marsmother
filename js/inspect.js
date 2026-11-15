@@ -243,7 +243,8 @@ function openInspect(p, point = null) {
       });
     } catch (e) {
       console.warn(e);
-      panoBtn.textContent = "DEM 읽기 실패";
+      panoBtn.textContent = "DEM 읽기 실패 · 다시 시도";
+      panoBtn.disabled = false;
       return;
     }
     panoBtn.disabled = false;
@@ -267,6 +268,7 @@ function openInspect(p, point = null) {
   positionPins();
   inspectPanel.inert = false;
   document.body.classList.add("is-inspect-open");
+  inspected.refill = fill; // 시각이 바뀌면 내용만 다시 채움 (상자 전체를 새로 그리면 스크롤 · 진행 중인 버튼이 초기화됨)
   fill();
   // DEM · 탐사 격자를 아직 못 읽었으면 읽은 뒤 다시 채움
   Promise.allSettled([loadSurvey(), loadDemGrid("mola")]).then(() => inspected && inspected.lon === p.lon && inspected.lat === p.lat && fill());
@@ -277,7 +279,7 @@ marsClock.onChange(() => {
   if (!inspected) return;
   const open = inspected;
   clearTimeout(marsClock.inspectTimer);
-  marsClock.inspectTimer = setTimeout(() => inspected === open && openInspect(open, open.point), 150);
+  marsClock.inspectTimer = setTimeout(() => inspected === open && open.refill?.(), 150);
 });
 
 // ---------- 지도 클릭 (끌기 · 위치 고르기 · 메뉴 닫는 클릭은 제외) ----------

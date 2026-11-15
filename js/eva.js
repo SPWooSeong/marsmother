@@ -60,16 +60,6 @@ function evaWaterKgPerS(watts) {
   return ((watts / 1000) * EVA.heatToWater) / EVA.sublimationKjPerKg;
 }
 
-// 1 m 를 걷는 데 드는 에너지의 최솟값 (길찾기 휴리스틱용)
-const EVA_MIN_J_PER_M = (() => {
-  let best = Infinity;
-  for (let g = -0.4; g <= 0.4; g += 0.005) {
-    const v = evaSpeed(g);
-    best = Math.min(best, evaMetabolicW(v, g) / v / Math.sqrt(1 + g * g));
-  }
-  return best;
-})();
-
 // 지금 설정(몸무게)에서 가장 단단한 땅(η 1.0) 기준 최솟값 — 길찾기 휴리스틱이 실제 비용을 넘지 않게
 let evaMinJCache = { key: null, value: 0 };
 function evaMinJPerM() {

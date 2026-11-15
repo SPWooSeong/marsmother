@@ -213,21 +213,47 @@ function renderDemCanvas(id) {
     const { grid, canvas, shade } = m;
     const g = canvas.getContext("2d");
     const img = g.createImageData(canvas.width, canvas.height);
-    const px = img.data;
+    const px32 = new Uint32Array(img.data.buffer); // 한 픽셀(RGBA)을 한 번에 씀
     const z = grid.values;
     const scale = 255 / Math.max(hi - lo, 0.1);
+    // 음영은 DEM 마다 고정이라 단계(0~SHADE_LEVELS-1)로 한 번만 바꿔 둠
+    if (!m.shadeIdx) {
+      m.shadeIdx = new Uint8Array(shade.length);
+      for (let i = 0; i < shade.length; i++) {
+        m.shadeIdx[i] = Math.max(0, Math.min(SHADE_LEVELS - 1, Math.round(shade[i] * (SHADE_LEVELS - 1))));
+      }
+    }
+    const sIdx = m.shadeIdx;
+    const packed = shadedLut32(lut);
     for (let i = 0; i < z.length; i++) {
-      const t = Math.max(0, Math.min(255, Math.round((z[i] - lo) * scale))) * 4;
-      const s = 0.35 + 0.75 * shade[i];
-      px[i * 4] = lut[t] * s;
-      px[i * 4 + 1] = lut[t + 1] * s;
-      px[i * 4 + 2] = lut[t + 2] * s;
-      px[i * 4 + 3] = 255;
+      const t = Math.max(0, Math.min(255, Math.round((z[i] - lo) * scale)));
+      px32[i] = packed[(sIdx[i] << 8) | t];
     }
     g.putImageData(img, 0, 0);
     m.drawnRange = [lo, hi];
   }
   return m.canvas;
+}
+
+// 색(256) × 음영 단계 표: 픽셀마다 곱셈 대신 표에서 바로 꺼내 씀 (색표는 바뀌지 않으므로 한 번만 만듦)
+const SHADE_LEVELS = 128;
+let shadedLutCache = null;
+function shadedLut32(lut) {
+  if (shadedLutCache && shadedLutCache.lut === lut) return shadedLutCache.packed;
+  const bytes = new Uint8ClampedArray(SHADE_LEVELS * 256 * 4);
+  for (let k = 0; k < SHADE_LEVELS; k++) {
+    const s = 0.35 + 0.75 * (k / (SHADE_LEVELS - 1));
+    for (let t = 0; t < 256; t++) {
+      const o = ((k << 8) | t) * 4;
+      bytes[o] = lut[t * 4] * s;
+      bytes[o + 1] = lut[t * 4 + 1] * s;
+      bytes[o + 2] = lut[t * 4 + 2] * s;
+      bytes[o + 3] = 255;
+    }
+  }
+  const packed = new Uint32Array(bytes.buffer);
+  shadedLutCache = { lut, packed };
+  return packed;
 }
 
 // 지금 화면에 보이는 경위도 범위
@@ -773,7 +799,7 @@ const RAMP_LEGENDS = {
 // 히트맵(지도 전체를 색으로 덮는) 레이어의 종류. 같은 종류끼리는 같이 켤 수 있고 (MOLA + HiRISE 고도는 색 기준이 같음),
 // 다른 종류를 켜면 먼저 켜져 있던 종류는 자동으로 꺼짐 — 무지개색 지도가 겹치면 읽을 수 없어서
 const HEATMAP_FAMILY = { mola_dem: "dem", hirise_dem: "dem", ti_overlay: "thermal", radiation: "radiation",
-  survey_explored: "survey", return_limit: "return" };
+  survey_explored: "survey", return_limit: "return", hazard_level: "hazard" };
 
 const layerInput = (id) => layerListEl.querySelector(`input[data-layer="${id}"]`);
 
@@ -835,7 +861,8 @@ function initLayerGroups() {
   layerListEl.querySelectorAll(".layer-group").forEach((group) => {
     const id = group.dataset.group;
     const fold = group.querySelector(".layer-group__fold");
-    fold.dataset.name = fold.textContent;
+    // 이름은 index.html 의 data-name (한국어 원문). textContent 는 이미 영어로 바뀌어 있을 수 있음
+    fold.dataset.name = fold.dataset.name || fold.textContent;
     const setCollapsed = (collapsed) => {
       group.classList.toggle("is-collapsed", collapsed);
       fold.setAttribute("aria-expanded", String(!collapsed));

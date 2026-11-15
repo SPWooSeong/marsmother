@@ -225,6 +225,11 @@
 
   function onKey(e) {
     if (!root) return;
+    // 안내 창의 버튼(건너뛰기 · 이전 · 기지 설치 등)에 초점이 있으면 Enter/Space 는 그 버튼을 누름
+    if ((e.key === "Enter" || e.key === " ") && e.target.closest?.("button") && root.contains(e.target)) {
+      e.stopPropagation();
+      return;
+    }
     if (e.key === "Escape") finish();
     else if (e.key === "ArrowRight" || e.key === "Enter") go(index + 1);
     else if (e.key === "ArrowLeft") go(index - 1);

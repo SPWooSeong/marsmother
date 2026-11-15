@@ -163,7 +163,9 @@ function setStop(stop, lonLat, name = null) {
 function stopDisplayValue(stop) {
   if (!stop.lonLat) return "";
   const coords = formatLonLat(stop.lonLat);
-  return stop.name ? `${stop.name} · ${coords}` : coords;
+  // 입력창 값(.value)은 화면 번역(js/i18n.js)이 손대지 않으므로 여기서 직접 번역
+  const name = stop.name && typeof i18nText === "function" ? i18nText(stop.name) : stop.name;
+  return name ? `${name} · ${coords}` : coords;
 }
 
 // ---------- 입력창 아래 추천 목록 (현위치 / 지도에서 선택 / 기존 포인트) ----------
@@ -326,7 +328,10 @@ function renderStops() {
 }
 
 // 입력이 바뀌면 이전 결과는 지우고 다시 그림
+let navGen = 0; // 입력이 바뀔 때마다 올라감 → 계산 중에 입력이 바뀌면 끝난 결과를 버림
 function onStopsChanged() {
+  navGen++;
+  resetHudWalkPlanner();
   nav.results = [];
   nav.selectedId = null;
   renderStops();
@@ -357,6 +362,7 @@ function resetRoute() {
 }
 
 routeResetBtn.addEventListener("click", resetRoute);
+document.addEventListener("languagechange", () => renderStops()); // 입력창에 적힌 이름도 바뀐 언어로
 document.addEventListener("regionchange", resetRoute);
 
 // ---------- 실제 길찾기 (A*) ----------
@@ -526,12 +532,19 @@ class DStarLite {
     const max = this.opt.maxSlopeDeg;
     if (g.slope[v] >= ABSOLUTE_SLOPE_DEG) return Infinity; // 절대 장애물: 도착지라도 못 감
     if (g.slope[v] > max && v !== this.goal) return Infinity;
-    // 나이트 이동은 지나치는 칸도 지날 수 있어야 함
-    if (Math.abs(ddx) + Math.abs(ddy) === 3) {
+    const steps = Math.abs(ddx) + Math.abs(ddy);
+    if (steps >= 2) {
       const ux = u % g.w, uy = (u - ux) / g.w;
-      const mx = ux + Math.sign(ddx) * (Math.abs(ddx) === 2 ? 1 : 0);
-      const my = uy + Math.sign(ddy) * (Math.abs(ddy) === 2 ? 1 : 0);
-      if (g.slope[my * g.w + mx] > max) return Infinity;
+      const sx = Math.sign(ddx), sy = Math.sign(ddy);
+      if (steps === 2) {
+        // 대각선: 양옆 두 칸이 모두 막혀 있으면 그 틈(모서리)으로는 못 지나감
+        if (g.slope[uy * g.w + ux + sx] > max && g.slope[(uy + sy) * g.w + ux] > max) return Infinity;
+      } else {
+        // 나이트 이동은 지나치는 두 칸이 모두 지날 수 있어야 함 (예: (2,1) → (1,0) 과 (1,1))
+        const mx = ux + sx * (Math.abs(ddx) === 2 ? 1 : 0);
+        const my = uy + sy * (Math.abs(ddy) === 2 ? 1 : 0);
+        if (g.slope[my * g.w + mx] > max || g.slope[(uy + sy) * g.w + ux + sx] > max) return Infinity;
+      }
     }
     return this.opt.cost(edgeOf(g, u, v, ddx, ddy), this.opt);
   }
@@ -724,7 +737,7 @@ function measureRoute(opt, path) {
         const r = g.rough[cell];
         roughSum += r * d3;
         if (r > 0.4) roughM += d3;
-        shadow = !!envShadowMap(when).map[cell]; // 그 시각의 태양 위치로
+        shadow = envShadowAt(when, cell); // 그 시각의 태양 위치로 (이 칸만 계산)
         if (shadow) shadowS += dt;
         if (hasBase && E.comm[cell]) commS += dt;
 
@@ -855,14 +868,17 @@ routeFindBtn.addEventListener("click", async () => {
 
   setRouteMsg("실제 지형(HiRISE DEM + 탐사 데이터)으로 D* Lite 경로 계산 중…");
   routeFindBtn.disabled = true;
+  const gen = navGen;
   try {
     const results = await findRoutes(nav.stops.map((s) => s.lonLat));
+    if (gen !== navGen) return; // 계산하는 동안 출발지 · 도착지 · 나의 정보 등이 바뀜 → 이 결과는 맞지 않음
     if (!results.length) {
       setRouteMsg(`경사 한계 ${PROFILE.slopeLimitDeg}° 안에서 걸어갈 수 있는 길 없음 (나의 정보에서 조정 가능)`, true);
       return;
     }
     nav.results = results;
     nav.selectedId = results[0].id;
+    resetHudWalkPlanner(); // 새 결과는 비용(출발 시각 · 그늘 · 나의 정보)이 다르므로 HUD 재탐색도 처음부터
     const missingNames = ROUTE_OPTIONS.filter((o) => !results.some((r) => r.id === o.id)).map((o) => o.name);
     setRouteMsg(
       `D* Lite · HiRISE DEM 30 m + 탐사 데이터 · 경사 한계 ${PROFILE.slopeLimitDeg}° · 출발 ${formatClockTime(marsClock.now())} 기준` +
@@ -910,6 +926,9 @@ function dilateCells(g, cells, r) {
 const HUD_WALK_STEP_M = 4; // 이만큼 움직일 때마다 주변 지형을 잼 (발자취 점 간격)
 const ARRIVE_M = 40; // 경유지 · 도착지에 이만큼 다가가면 도착한 것으로
 const hudWalk = { last: null, planner: null, key: null, nextStop: 1 };
+function resetHudWalkPlanner() {
+  Object.assign(hudWalk, { planner: null, key: null, nextStop: 1 });
+}
 
 function onHudWalk(here) {
   if (!survey.loaded) return;
@@ -1011,7 +1030,7 @@ function profileSvg(r) {
   const H = 54;
   const range = Math.max(r.maxElevM - r.minElevM, 1);
   const pts = r.profile.map((p) => {
-    const x = (p.dist / r.distanceM) * W;
+    const x = r.distanceM ? (p.dist / r.distanceM) * W : 0; // 출발 = 도착이면 거리 0
     const y = 4 + ((r.maxElevM - p.elev) / range) * (H - 8);
     return [x, y];
   });
