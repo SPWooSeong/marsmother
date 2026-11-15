@@ -8,6 +8,9 @@ https://www.spaceappschallenge.org/2026/challenges/interplanetary-survival-guide
 ## Website
 https~~~~
 
+## Website
+https://marsmother-snowy.vercel.app/
+
 ## Route
 Finds walkable routes between a start point, up to three waypoints and a destination over real HiRISE terrain data (D* Lite), and shows the time, oxygen, energy and radiation each route would cost.
 <img src="./src/route.png">
